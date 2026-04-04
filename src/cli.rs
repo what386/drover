@@ -1,0 +1,208 @@
+use anyhow::{Context, Result, anyhow, bail};
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Cli {
+    pub model: Option<String>,
+    pub system: Option<String>,
+    pub temp: Option<f32>,
+    pub stream: bool,
+    pub verbose: bool,
+    pub prompt: Option<String>,
+}
+
+impl Cli {
+    pub fn parse<I>(args: I) -> Result<Self>
+    where
+        I: IntoIterator<Item = String>,
+    {
+        Self::parse_from(args).with_context(|| Self::invalid_input_help())
+    }
+
+    pub fn invalid_input_help() -> String {
+        format!("invalid command line input\n\n{}", Self::help_text())
+    }
+
+    pub fn help_text() -> &'static str {
+        concat!(
+            "Usage:\n",
+            "  drover \"prompt\"\n",
+            "  cat file.txt | drover\n",
+            "\n",
+            "Options:\n",
+            "  --model <name>     Model selection\n",
+            "  --system <prompt>  System prompt\n",
+            "  --temp <value>     Temperature\n",
+            "  --no-stream        Wait for the full response before printing\n",
+            "  --verbose          Show model and timing details on stderr\n",
+        )
+    }
+
+    fn parse_from<I>(args: I) -> Result<Self>
+    where
+        I: IntoIterator<Item = String>,
+    {
+        let mut cli = Self {
+            model: None,
+            system: None,
+            temp: None,
+            stream: true,
+            verbose: false,
+            prompt: None,
+        };
+
+        let mut args = args.into_iter();
+        while let Some(arg) = args.next() {
+            match arg.as_str() {
+                "--model" => {
+                    cli.model = Some(next_value(&mut args, "--model")?);
+                }
+                "--system" => {
+                    cli.system = Some(next_value(&mut args, "--system")?);
+                }
+                "--temp" => {
+                    let value = next_value(&mut args, "--temp")?;
+                    cli.temp = Some(parse_temp(&value)?);
+                }
+                "--no-stream" => {
+                    cli.stream = false;
+                }
+                "--verbose" => {
+                    cli.verbose = true;
+                }
+                _ if arg.starts_with("--") => {
+                    return Err(anyhow!("unknown flag: {arg}"));
+                }
+                _ => {
+                    if cli.prompt.replace(arg).is_some() {
+                        bail!("unexpected extra positional argument");
+                    }
+                }
+            }
+        }
+
+        Ok(cli)
+    }
+}
+
+fn next_value<I>(args: &mut I, flag: &str) -> Result<String>
+where
+    I: Iterator<Item = String>,
+{
+    args.next()
+        .ok_or_else(|| anyhow!("missing value for {flag}"))
+}
+
+fn parse_temp(value: &str) -> Result<f32> {
+    value
+        .parse::<f32>()
+        .context(format!("invalid value for --temp: {value}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Cli;
+
+    fn parse(args: &[&str]) -> anyhow::Result<Cli> {
+        Cli::parse(args.iter().map(|arg| (*arg).to_owned()))
+    }
+
+    #[test]
+    fn parses_prompt_only() {
+        let cli = parse(&["write a haiku"]).unwrap();
+
+        assert_eq!(cli.prompt.as_deref(), Some("write a haiku"));
+        assert_eq!(cli.model, None);
+        assert_eq!(cli.system, None);
+        assert_eq!(cli.temp, None);
+        assert!(cli.stream);
+        assert!(!cli.verbose);
+    }
+
+    #[test]
+    fn parses_stdin_style_invocation_without_prompt() {
+        let cli = parse(&[]).unwrap();
+
+        assert_eq!(cli.prompt, None);
+        assert!(cli.stream);
+    }
+
+    #[test]
+    fn parses_all_supported_flags() {
+        let cli = parse(&[
+            "--model",
+            "llama3",
+            "--system",
+            "you are a poet",
+            "--no-stream",
+            "--verbose",
+            "write a sonnet",
+        ])
+        .unwrap();
+
+        assert_eq!(cli.model.as_deref(), Some("llama3"));
+        assert_eq!(cli.system.as_deref(), Some("you are a poet"));
+        assert!(!cli.stream);
+        assert!(cli.verbose);
+        assert_eq!(cli.prompt.as_deref(), Some("write a sonnet"));
+    }
+
+    #[test]
+    fn parses_temp_space_separated_syntax() {
+        let cli = parse(&["--temp", "0.7", "prompt"]).unwrap();
+
+        assert_eq!(cli.temp, Some(0.7));
+        assert_eq!(cli.prompt.as_deref(), Some("prompt"));
+    }
+
+    #[test]
+    fn rejects_missing_model_value() {
+        let err = parse(&["--model"]).unwrap_err();
+
+        assert_eq!(err.to_string(), Cli::invalid_input_help());
+        assert_eq!(
+            err.source().unwrap().to_string(),
+            "missing value for --model"
+        );
+    }
+
+    #[test]
+    fn rejects_missing_system_value() {
+        let err = parse(&["--system"]).unwrap_err();
+
+        assert_eq!(err.to_string(), Cli::invalid_input_help());
+        assert_eq!(
+            err.source().unwrap().to_string(),
+            "missing value for --system"
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_positionals() {
+        let err = parse(&["first", "second"]).unwrap_err();
+
+        assert_eq!(err.to_string(), Cli::invalid_input_help());
+        assert_eq!(
+            err.source().unwrap().to_string(),
+            "unexpected extra positional argument"
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_flag() {
+        let err = parse(&["--bogus"]).unwrap_err();
+
+        assert_eq!(err.to_string(), Cli::invalid_input_help());
+        assert_eq!(err.source().unwrap().to_string(), "unknown flag: --bogus");
+    }
+
+    #[test]
+    fn rejects_invalid_temp() {
+        let err = parse(&["--temp", "hot"]).unwrap_err();
+
+        assert_eq!(err.to_string(), Cli::invalid_input_help());
+        assert_eq!(
+            err.source().unwrap().to_string(),
+            "invalid value for --temp: hot"
+        );
+    }
+}
