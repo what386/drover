@@ -29,11 +29,13 @@ impl Cli {
             "  cat file.txt | drover\n",
             "\n",
             "Options:\n",
+            "  --help             Show this help text and exit\n",
             "  --model <name>     Model selection\n",
             "  --system <prompt>  System prompt\n",
             "  --temp <value>     Temperature\n",
             "  --no-stream        Wait for the full response before printing\n",
             "  --verbose          Show model and timing details on stderr\n",
+            "  --version          Show the crate version and exit\n",
         )
     }
 
@@ -204,5 +206,14 @@ mod tests {
             err.source().unwrap().to_string(),
             "invalid value for --temp: hot"
         );
+    }
+
+    #[test]
+    fn help_text_includes_help_and_version_flags() {
+        let help = Cli::help_text();
+
+        assert!(help.contains("--help"));
+        assert!(help.contains("--version"));
+        assert!(help.contains("--temp <value>"));
     }
 }
