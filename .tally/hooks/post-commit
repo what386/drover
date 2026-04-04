@@ -1,0 +1,7 @@
+#!/bin/bash
+# src/git/hooks/post-commit
+# tally-managed-hook
+
+tally scan
+
+exit 0
