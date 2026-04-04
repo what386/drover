@@ -14,4 +14,5 @@
 - [x] initial release
       @created 2026-04-04 23:49
       @completed 2026-04-04 23:49
+      @completed_version 0.1.0
 
