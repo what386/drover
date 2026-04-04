@@ -8,3 +8,6 @@
 - [ ] feat: Tool invocations (filesystem access, primarily)
       @created 2026-04-04 23:27
 
+- [ ] initial release
+      @created 2026-04-04 23:49
+
