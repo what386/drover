@@ -15,7 +15,7 @@ impl Cli {
     where
         I: IntoIterator<Item = String>,
     {
-        Self::parse_from(args).with_context(|| Self::invalid_input_help())
+        Self::parse_from(args).with_context(Self::invalid_input_help)
     }
 
     pub fn invalid_input_help() -> String {
