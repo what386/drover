@@ -110,8 +110,9 @@ impl OllamaClient {
                     .unwrap_or_else(|_| String::from("<unreadable response body>"));
                 Err(anyhow!("Ollama request failed with status {code}: {body}"))
             }
-            Err(ureq::Error::Transport(err)) => Err(anyhow!(err))
-                .context(format!("failed to connect to Ollama at {}", self.host)),
+            Err(ureq::Error::Transport(err)) => {
+                Err(anyhow!(err)).context(format!("failed to connect to Ollama at {}", self.host))
+            }
         }
     }
 
@@ -338,16 +339,21 @@ mod tests {
     fn rejects_missing_response_field() {
         let err = parse_generate_response(r#"{"done":true}"#).unwrap_err();
 
-        assert_eq!(err.to_string(), "missing or invalid `response` in Ollama response");
+        assert_eq!(
+            err.to_string(),
+            "missing or invalid `response` in Ollama response"
+        );
     }
 
     #[test]
     fn rejects_invalid_numeric_metadata() {
-        let err = parse_generate_response(
-            r#"{"response":"hello","done":true,"total_duration":"fast"}"#,
-        )
-        .unwrap_err();
+        let err =
+            parse_generate_response(r#"{"response":"hello","done":true,"total_duration":"fast"}"#)
+                .unwrap_err();
 
-        assert_eq!(err.to_string(), "invalid `total_duration` in Ollama response");
+        assert_eq!(
+            err.to_string(),
+            "invalid `total_duration` in Ollama response"
+        );
     }
 }

@@ -44,8 +44,10 @@ impl Config {
 
     fn write_to_path(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .context(format!("failed to create config directory: {}", parent.display()))?;
+            fs::create_dir_all(parent).context(format!(
+                "failed to create config directory: {}",
+                parent.display()
+            ))?;
         }
 
         fs::write(path, self.to_toml())
