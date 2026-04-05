@@ -8,9 +8,6 @@
 - [ ] implement history/session management #feature
       @created 2026-04-05 14:23
 
-- [ ] fix streamed output for tool-enabled mode
-      @created 2026-04-05 20:02
-
 
 ## Completed
 
@@ -35,5 +32,9 @@
 
 - [x] rename --no-stream to --script-output for scripting
       @created 2026-04-05 20:03
+      @completed 2026-04-05 20:05
+
+- [x] fix streamed output for tool-enabled mode
+      @created 2026-04-05 20:02
       @completed 2026-04-05 20:05
 

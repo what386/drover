@@ -126,5 +126,15 @@
       "completed_at": "2026-04-05T20:05:33.111639069Z"
     },
     "version": null
+  },
+  {
+    "change": {
+      "description": "fix streamed output for tool-enabled mode",
+      "priority": "Medium",
+      "tags": [],
+      "commit": null,
+      "completed_at": "2026-04-05T20:05:50.507178829Z"
+    },
+    "version": null
   }
 ]
