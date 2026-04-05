@@ -19,15 +19,20 @@ impl Cli {
         let request = self.build_request(&config, prompt)?;
         let host = self.resolve_host(&config)?;
         let model = request.model.clone();
-        let effective_system_prompt = Self::effective_system_prompt(request.system.as_deref());
+        let effective_system_prompt =
+            Self::effective_system_prompt(request.system.as_deref(), !self.no_tools);
         let client = OllamaClient::new(host.clone());
         let started_at = Instant::now();
-        let final_response = self.run_tool_loop(
-            &client,
-            &request,
-            &effective_system_prompt,
-            env::current_dir()?,
-        )?;
+        let final_response = if self.no_tools {
+            self.run_without_tools(&client, &request, &effective_system_prompt)?
+        } else {
+            self.run_tool_loop(
+                &client,
+                &request,
+                &effective_system_prompt,
+                env::current_dir()?,
+            )?
+        };
 
         if self.verbose {
             self.print_verbose(
@@ -154,6 +159,27 @@ impl Cli {
         bail!("tool loop exceeded maximum step count")
     }
 
+    fn run_without_tools(
+        &self,
+        client: &OllamaClient,
+        request: &GenerateRequest,
+        effective_system_prompt: &str,
+    ) -> Result<GenerateResponse> {
+        let step_request = GenerateRequest {
+            model: request.model.clone(),
+            prompt: request.prompt.clone(),
+            system: Some(effective_system_prompt.to_owned()),
+            temp: request.temp,
+            stream: request.stream,
+        };
+
+        if request.stream {
+            self.run_streaming_turn_without_tools(client, &step_request)
+        } else {
+            self.run_non_streaming_turn_without_tools(client, &step_request)
+        }
+    }
+
     fn run_non_streaming_turn(
         &self,
         client: &OllamaClient,
@@ -166,6 +192,16 @@ impl Cli {
 
         self.write_final_response(&response)?;
         Ok(TurnOutcome::Final(response))
+    }
+
+    fn run_non_streaming_turn_without_tools(
+        &self,
+        client: &OllamaClient,
+        request: &GenerateRequest,
+    ) -> Result<GenerateResponse> {
+        let response = client.generate(request)?;
+        self.write_final_response(&response)?;
+        Ok(response)
     }
 
     fn run_streaming_turn(
@@ -205,10 +241,38 @@ impl Cli {
         }
     }
 
-    fn effective_system_prompt(existing: Option<&str>) -> String {
-        match existing {
-            Some(existing) => format!("{existing}\n\n{TOOL_SYSTEM_PROMPT}"),
-            None => TOOL_SYSTEM_PROMPT.to_owned(),
+    fn run_streaming_turn_without_tools(
+        &self,
+        client: &OllamaClient,
+        request: &GenerateRequest,
+    ) -> Result<GenerateResponse> {
+        let mut stdout = io::stdout().lock();
+        let response = client.generate_streaming(request, |chunk| {
+            if !chunk.response.is_empty() {
+                stdout
+                    .write_all(chunk.response.as_bytes())
+                    .context("failed to write response to stdout")?;
+                stdout.flush().context("failed to flush stdout")?;
+            }
+            Ok(())
+        })?;
+
+        if !response.response.ends_with('\n') {
+            stdout
+                .write_all(b"\n")
+                .context("failed to write newline to stdout")?;
+            stdout.flush().context("failed to flush stdout")?;
+        }
+
+        Ok(response)
+    }
+
+    fn effective_system_prompt(existing: Option<&str>, tools_enabled: bool) -> String {
+        match (existing, tools_enabled) {
+            (Some(existing), true) => format!("{existing}\n\n{TOOL_SYSTEM_PROMPT}"),
+            (Some(existing), false) => existing.to_owned(),
+            (None, true) => TOOL_SYSTEM_PROMPT.to_owned(),
+            (None, false) => String::new(),
         }
     }
 
@@ -344,14 +408,15 @@ impl StreamProbe {
 
         if done
             && let ProbeMode::Pending(buffer) = &mut self.mode
-                && !buffer.is_empty() {
-                    let output = buffer.clone();
-                    self.mode = ProbeMode::PassThrough;
-                    match flushed {
-                        Some(existing) => flushed = Some(existing + &output),
-                        None => flushed = Some(output),
-                    }
-                }
+            && !buffer.is_empty()
+        {
+            let output = buffer.clone();
+            self.mode = ProbeMode::PassThrough;
+            match flushed {
+                Some(existing) => flushed = Some(existing + &output),
+                None => flushed = Some(output),
+            }
+        }
 
         flushed
     }
@@ -376,6 +441,7 @@ mod tests {
             model: None,
             system: None,
             temp: None,
+            no_tools: false,
             stream: true,
             verbose: false,
             prompt: Some("prompt".to_owned()),
@@ -424,6 +490,7 @@ mod tests {
             model: Some("cli-model".to_owned()),
             system: Some("sys".to_owned()),
             temp: Some(0.1),
+            no_tools: false,
             stream: false,
             verbose: false,
             prompt: Some("prompt".to_owned()),
@@ -450,6 +517,7 @@ mod tests {
             model: None,
             system: None,
             temp: None,
+            no_tools: false,
             stream: true,
             verbose: false,
             prompt: None,
@@ -466,9 +534,21 @@ mod tests {
 
     #[test]
     fn effective_system_prompt_appends_tool_instructions() {
-        let prompt = Cli::effective_system_prompt(Some("be concise"));
+        let prompt = Cli::effective_system_prompt(Some("be concise"), true);
         assert!(prompt.contains("be concise"));
         assert!(prompt.contains("TOOL: read"));
+    }
+
+    #[test]
+    fn effective_system_prompt_skips_tool_instructions_when_disabled() {
+        let prompt = Cli::effective_system_prompt(Some("be concise"), false);
+        assert_eq!(prompt, "be concise");
+    }
+
+    #[test]
+    fn effective_system_prompt_is_empty_without_system_or_tools() {
+        let prompt = Cli::effective_system_prompt(None, false);
+        assert!(prompt.is_empty());
     }
 
     #[test]

@@ -6,6 +6,7 @@ pub struct Cli {
     pub model: Option<String>,
     pub system: Option<String>,
     pub temp: Option<f32>,
+    pub no_tools: bool,
     pub stream: bool,
     pub verbose: bool,
     pub prompt: Option<String>,
@@ -36,6 +37,7 @@ impl Cli {
             "  --model, -m <name> Model selection\n",
             "  --system, -s <prompt>  System prompt\n",
             "  --temp, -t <value> Temperature\n",
+            "  --no-tools         Disable tool use for this run\n",
             "  --no-stream        Wait for the full response before printing\n",
             "  --verbose, -v      Show model and timing details on stderr\n",
             "  --version          Show the crate version and exit\n",
@@ -51,6 +53,7 @@ impl Cli {
             model: None,
             system: None,
             temp: None,
+            no_tools: false,
             stream: true,
             verbose: false,
             prompt: None,
@@ -74,6 +77,9 @@ impl Cli {
                 }
                 "--no-stream" => {
                     cli.stream = false;
+                }
+                "--no-tools" => {
+                    cli.no_tools = true;
                 }
                 "--verbose" | "-v" => {
                     cli.verbose = true;
@@ -124,6 +130,7 @@ mod tests {
         assert_eq!(cli.model, None);
         assert_eq!(cli.system, None);
         assert_eq!(cli.temp, None);
+        assert!(!cli.no_tools);
         assert!(cli.stream);
         assert!(!cli.verbose);
     }
@@ -146,6 +153,7 @@ mod tests {
             "-s",
             "you are a poet",
             "--no-stream",
+            "--no-tools",
             "-v",
             "write a sonnet",
         ])
@@ -155,6 +163,7 @@ mod tests {
         assert_eq!(cli.model.as_deref(), Some("llama3"));
         assert_eq!(cli.system.as_deref(), Some("you are a poet"));
         assert!(!cli.stream);
+        assert!(cli.no_tools);
         assert!(cli.verbose);
         assert_eq!(cli.prompt.as_deref(), Some("write a sonnet"));
     }
@@ -238,6 +247,7 @@ mod tests {
         assert!(help.contains("--host, -H <url>"));
         assert!(help.contains("--version"));
         assert!(help.contains("--temp, -t <value>"));
+        assert!(help.contains("--no-tools"));
         assert!(help.contains("--model, -m <name>"));
         assert!(help.contains("--system, -s <prompt>"));
         assert!(help.contains("--verbose, -v"));
@@ -263,7 +273,16 @@ mod tests {
         assert_eq!(cli.model.as_deref(), Some("llama3"));
         assert_eq!(cli.system.as_deref(), Some("you are a poet"));
         assert_eq!(cli.temp, Some(0.7));
+        assert!(!cli.no_tools);
         assert!(cli.verbose);
         assert!(cli.stream);
+    }
+
+    #[test]
+    fn parses_no_tools_flag() {
+        let cli = parse(&["--no-tools", "prompt"]).unwrap();
+
+        assert!(cli.no_tools);
+        assert_eq!(cli.prompt.as_deref(), Some("prompt"));
     }
 }

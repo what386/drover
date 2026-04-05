@@ -35,6 +35,7 @@ drover --model llama3 "prompt"
 drover --host http://localhost:11434 "prompt"
 drover --system "you are a poet" "prompt"
 drover --temp 0.7 "prompt"
+drover --no-tools "prompt"
 drover --no-stream "prompt"
 drover --verbose "prompt"
 
@@ -69,6 +70,7 @@ CLI flags override config values for the current invocation.
 - if both stdin and a prompt are provided, the prompt is treated as the instruction and stdin is appended as `Input:` context
 - the model can request read-only tools using `TOOL: read|<path>`, `TOOL: ls|<path>`, `TOOL: stat|<path>`, `TOOL: tree|<path>|<depth>`, `TOOL: glob|<pattern>`, `TOOL: search|<pattern>|<path>`, and `TOOL: env`
 - use `glob` to find files by name or extension, `search` to match file contents, `stat` to inspect metadata, and `env` to inspect execution context
+- `--no-tools` disables tool prompting and ignores unprompted `TOOL:` output as plain model text
 - `--system` is a per-command override
 - `--verbose` prints request and timing details to `stderr`
 - `--no-stream` waits for the full response before printing
