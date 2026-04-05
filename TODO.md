@@ -1,4 +1,4 @@
-# TODO — drover v0.3.2
+# TODO — drover v0.4.0
 
 @created: 2026-04-04
 @modified: 2026-04-05
@@ -29,12 +29,15 @@
 - [x] fix status writeback to stdout
       @created 2026-04-05 19:23
       @completed 2026-04-05 20:02
+      @completed_version 0.4.0
 
 - [x] rename --no-stream to --script-output for scripting
       @created 2026-04-05 20:03
       @completed 2026-04-05 20:05
+      @completed_version 0.4.0
 
 - [x] fix streamed output for tool-enabled mode
       @created 2026-04-05 20:02
       @completed 2026-04-05 20:05
+      @completed_version 0.4.0
 
