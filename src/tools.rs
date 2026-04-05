@@ -252,12 +252,11 @@ fn tree_path(base_dir: &Path, path: &str, max_depth: usize) -> Result<String> {
     let resolved = resolve_path(base_dir, path)?;
     let rel = display_relative(base_dir, &resolved);
     let mut lines = vec![format!("TREE {rel} (depth {max_depth})")];
-    collect_tree(base_dir, &resolved, 0, max_depth, &mut lines)?;
+    collect_tree(&resolved, 0, max_depth, &mut lines)?;
     Ok(truncate_output(lines.join("\n"), path))
 }
 
 fn collect_tree(
-    base_dir: &Path,
     path: &Path,
     depth: usize,
     max_depth: usize,
@@ -279,7 +278,7 @@ fn collect_tree(
         let name = entry.file_name().to_string_lossy().into_owned();
         if entry_path.is_dir() {
             lines.push(format!("{indent}{name}/"));
-            collect_tree(base_dir, &entry_path, depth + 1, max_depth, lines)?;
+            collect_tree(&entry_path, depth + 1, max_depth, lines)?;
         } else {
             lines.push(format!("{indent}{name}"));
         }
@@ -529,10 +528,10 @@ fn format_permissions(metadata: &fs::Metadata) -> String {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        return format!(
+        format!(
             "readonly={readonly}, mode={:o}",
             metadata.permissions().mode() & 0o777
-        );
+        )
     }
     #[cfg(not(unix))]
     {

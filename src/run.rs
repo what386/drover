@@ -342,9 +342,9 @@ impl StreamProbe {
             }
         }
 
-        if done {
-            if let ProbeMode::Pending(buffer) = &mut self.mode {
-                if !buffer.is_empty() {
+        if done
+            && let ProbeMode::Pending(buffer) = &mut self.mode
+                && !buffer.is_empty() {
                     let output = buffer.clone();
                     self.mode = ProbeMode::PassThrough;
                     match flushed {
@@ -352,8 +352,6 @@ impl StreamProbe {
                         None => flushed = Some(output),
                     }
                 }
-            }
-        }
 
         flushed
     }
