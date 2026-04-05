@@ -117,14 +117,7 @@ host = "http://localhost:11434"
         let config = Config::load_from_path(&path).unwrap();
 
         assert_eq!(config, Config::default());
-        let written = fs::read_to_string(&path).unwrap();
-        assert_eq!(
-            written,
-            "model = \"llama3\"\nhost = \"http://localhost:11434\"\ntemp = 0.7\n"
-        );
-
-        fs::remove_file(&path).unwrap();
-        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+        assert!(!path.exists());
     }
 
     #[test]
