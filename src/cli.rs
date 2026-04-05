@@ -2,6 +2,7 @@ use anyhow::{Context, Result, anyhow, bail};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Cli {
+    pub host: Option<String>,
     pub model: Option<String>,
     pub system: Option<String>,
     pub temp: Option<f32>,
@@ -30,6 +31,7 @@ impl Cli {
             "\n",
             "Options:\n",
             "  --help             Show this help text and exit\n",
+            "  --host <url>       Ollama host override\n",
             "  --model <name>     Model selection\n",
             "  --system <prompt>  System prompt\n",
             "  --temp <value>     Temperature\n",
@@ -44,6 +46,7 @@ impl Cli {
         I: IntoIterator<Item = String>,
     {
         let mut cli = Self {
+            host: None,
             model: None,
             system: None,
             temp: None,
@@ -55,6 +58,9 @@ impl Cli {
         let mut args = args.into_iter();
         while let Some(arg) = args.next() {
             match arg.as_str() {
+                "--host" => {
+                    cli.host = Some(next_value(&mut args, "--host")?);
+                }
                 "--model" => {
                     cli.model = Some(next_value(&mut args, "--model")?);
                 }
@@ -113,6 +119,7 @@ mod tests {
         let cli = parse(&["write a haiku"]).unwrap();
 
         assert_eq!(cli.prompt.as_deref(), Some("write a haiku"));
+        assert_eq!(cli.host, None);
         assert_eq!(cli.model, None);
         assert_eq!(cli.system, None);
         assert_eq!(cli.temp, None);
@@ -133,6 +140,8 @@ mod tests {
         let cli = parse(&[
             "--model",
             "llama3",
+            "--host",
+            "http://localhost:11434",
             "--system",
             "you are a poet",
             "--no-stream",
@@ -141,6 +150,7 @@ mod tests {
         ])
         .unwrap();
 
+        assert_eq!(cli.host.as_deref(), Some("http://localhost:11434"));
         assert_eq!(cli.model.as_deref(), Some("llama3"));
         assert_eq!(cli.system.as_deref(), Some("you are a poet"));
         assert!(!cli.stream);
@@ -165,6 +175,14 @@ mod tests {
             err.source().unwrap().to_string(),
             "missing value for --model"
         );
+    }
+
+    #[test]
+    fn rejects_missing_host_value() {
+        let err = parse(&["--host"]).unwrap_err();
+
+        assert_eq!(err.to_string(), Cli::invalid_input_help());
+        assert_eq!(err.source().unwrap().to_string(), "missing value for --host");
     }
 
     #[test]
@@ -213,6 +231,7 @@ mod tests {
         let help = Cli::help_text();
 
         assert!(help.contains("--help"));
+        assert!(help.contains("--host <url>"));
         assert!(help.contains("--version"));
         assert!(help.contains("--temp <value>"));
     }

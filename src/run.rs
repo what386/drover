@@ -11,10 +11,7 @@ impl Cli {
         let prompt = self.resolve_prompt(stdin_is_terminal)?;
         let config = Config::load().context("failed to load config")?;
         let request = self.build_request(&config, prompt)?;
-        let host = config
-            .host
-            .clone()
-            .ok_or_else(|| anyhow!("config is missing `host`"))?;
+        let host = self.resolve_host(&config)?;
         let model = request.model.clone();
         let client = OllamaClient::new(host.clone());
         let started_at = Instant::now();
@@ -72,6 +69,13 @@ impl Cli {
             temp,
             stream: self.stream,
         })
+    }
+
+    fn resolve_host(&self, config: &Config) -> Result<String> {
+        self.host
+            .clone()
+            .or_else(|| config.host.clone())
+            .ok_or_else(|| anyhow!("config is missing `host`"))
     }
 
     fn run_non_streaming(
@@ -164,6 +168,7 @@ mod tests {
     #[test]
     fn resolve_prompt_prefers_cli_prompt() {
         let cli = Cli {
+            host: None,
             model: None,
             system: None,
             temp: None,
@@ -178,6 +183,7 @@ mod tests {
     #[test]
     fn resolve_prompt_requires_input_when_stdin_is_terminal() {
         let cli = Cli {
+            host: None,
             model: None,
             system: None,
             temp: None,
@@ -199,6 +205,7 @@ mod tests {
     #[test]
     fn build_request_prefers_cli_values_over_config() {
         let cli = Cli {
+            host: Some("http://override:11434".to_owned()),
             model: Some("cli-model".to_owned()),
             system: Some("sys".to_owned()),
             temp: Some(0.1),
@@ -218,11 +225,13 @@ mod tests {
         assert_eq!(request.system.as_deref(), Some("sys"));
         assert_eq!(request.temp, Some(0.1));
         assert!(!request.stream);
+        assert_eq!(cli.resolve_host(&config).unwrap(), "http://override:11434");
     }
 
     #[test]
     fn build_request_falls_back_to_config() {
         let cli = Cli {
+            host: None,
             model: None,
             system: None,
             temp: None,
@@ -237,5 +246,6 @@ mod tests {
         assert_eq!(request.model, "llama3");
         assert_eq!(request.temp, Some(0.7));
         assert!(request.stream);
+        assert_eq!(cli.resolve_host(&config).unwrap(), "http://localhost:11434");
     }
 }
