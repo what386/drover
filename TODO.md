@@ -8,6 +8,9 @@
 - [ ] feat: Tool invocations (filesystem access, primarily)
       @created 2026-04-04 23:27
 
+- [ ] add shorthands for common cli flags
+      @created 2026-04-05 03:46
+
 
 ## Completed
 
