@@ -32,12 +32,12 @@ impl Cli {
             "\n",
             "Options:\n",
             "  --help             Show this help text and exit\n",
-            "  --host <url>       Ollama host override\n",
-            "  --model <name>     Model selection\n",
-            "  --system <prompt>  System prompt\n",
-            "  --temp <value>     Temperature\n",
+            "  --host, -H <url>   Ollama host override\n",
+            "  --model, -m <name> Model selection\n",
+            "  --system, -s <prompt>  System prompt\n",
+            "  --temp, -t <value> Temperature\n",
             "  --no-stream        Wait for the full response before printing\n",
-            "  --verbose          Show model and timing details on stderr\n",
+            "  --verbose, -v      Show model and timing details on stderr\n",
             "  --version          Show the crate version and exit\n",
         )
     }
@@ -59,23 +59,23 @@ impl Cli {
         let mut args = args.into_iter();
         while let Some(arg) = args.next() {
             match arg.as_str() {
-                "--host" => {
+                "--host" | "-H" => {
                     cli.host = Some(next_value(&mut args, "--host")?);
                 }
-                "--model" => {
+                "--model" | "-m" => {
                     cli.model = Some(next_value(&mut args, "--model")?);
                 }
-                "--system" => {
+                "--system" | "-s" => {
                     cli.system = Some(next_value(&mut args, "--system")?);
                 }
-                "--temp" => {
+                "--temp" | "-t" => {
                     let value = next_value(&mut args, "--temp")?;
                     cli.temp = Some(parse_temp(&value)?);
                 }
                 "--no-stream" => {
                     cli.stream = false;
                 }
-                "--verbose" => {
+                "--verbose" | "-v" => {
                     cli.verbose = true;
                 }
                 _ if arg.starts_with("--") => {
@@ -139,14 +139,14 @@ mod tests {
     #[test]
     fn parses_all_supported_flags() {
         let cli = parse(&[
-            "--model",
+            "-m",
             "llama3",
-            "--host",
+            "-H",
             "http://localhost:11434",
-            "--system",
+            "-s",
             "you are a poet",
             "--no-stream",
-            "--verbose",
+            "-v",
             "write a sonnet",
         ])
         .unwrap();
@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn parses_temp_space_separated_syntax() {
-        let cli = parse(&["--temp", "0.7", "prompt"]).unwrap();
+        let cli = parse(&["-t", "0.7", "prompt"]).unwrap();
 
         assert_eq!(cli.temp, Some(0.7));
         assert_eq!(cli.prompt.as_deref(), Some("prompt"));
@@ -169,7 +169,7 @@ mod tests {
 
     #[test]
     fn rejects_missing_model_value() {
-        let err = parse(&["--model"]).unwrap_err();
+        let err = parse(&["-m"]).unwrap_err();
 
         assert_eq!(err.to_string(), Cli::invalid_input_help());
         assert_eq!(
@@ -180,7 +180,7 @@ mod tests {
 
     #[test]
     fn rejects_missing_host_value() {
-        let err = parse(&["--host"]).unwrap_err();
+        let err = parse(&["-H"]).unwrap_err();
 
         assert_eq!(err.to_string(), Cli::invalid_input_help());
         assert_eq!(err.source().unwrap().to_string(), "missing value for --host");
@@ -188,7 +188,7 @@ mod tests {
 
     #[test]
     fn rejects_missing_system_value() {
-        let err = parse(&["--system"]).unwrap_err();
+        let err = parse(&["-s"]).unwrap_err();
 
         assert_eq!(err.to_string(), Cli::invalid_input_help());
         assert_eq!(
@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     fn rejects_invalid_temp() {
-        let err = parse(&["--temp", "hot"]).unwrap_err();
+        let err = parse(&["-t", "hot"]).unwrap_err();
 
         assert_eq!(err.to_string(), Cli::invalid_input_help());
         assert_eq!(
@@ -232,8 +232,35 @@ mod tests {
         let help = Cli::help_text();
 
         assert!(help.contains("--help"));
-        assert!(help.contains("--host <url>"));
+        assert!(help.contains("--host, -H <url>"));
         assert!(help.contains("--version"));
-        assert!(help.contains("--temp <value>"));
+        assert!(help.contains("--temp, -t <value>"));
+        assert!(help.contains("--model, -m <name>"));
+        assert!(help.contains("--system, -s <prompt>"));
+        assert!(help.contains("--verbose, -v"));
+    }
+
+    #[test]
+    fn parses_mixed_short_and_long_flags() {
+        let cli = parse(&[
+            "--model",
+            "llama3",
+            "-H",
+            "http://localhost:11434",
+            "--system",
+            "you are a poet",
+            "-t",
+            "0.7",
+            "-v",
+            "write a sonnet",
+        ])
+        .unwrap();
+
+        assert_eq!(cli.host.as_deref(), Some("http://localhost:11434"));
+        assert_eq!(cli.model.as_deref(), Some("llama3"));
+        assert_eq!(cli.system.as_deref(), Some("you are a poet"));
+        assert_eq!(cli.temp, Some(0.7));
+        assert!(cli.verbose);
+        assert!(cli.stream);
     }
 }
