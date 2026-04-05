@@ -11,6 +11,9 @@
 - [ ] bug: fix path traversal following symlinks (could escape CWD)
       @created 2026-04-05 22:18
 
+- [ ] feat: prevent config from automatically making a config file (require users to set up manually)
+      @created 2026-04-05 22:19
+
 
 ## Completed
 
