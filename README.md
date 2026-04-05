@@ -8,7 +8,7 @@ It supports:
 - combined prompt plus `stdin` context
 - model, system prompt, and temperature overrides
 - host override for one-off Ollama targets
-- streaming or non-streaming output
+- interactive or script-friendly buffered output
 - read-only filesystem tool invocation during a run
 - a simple TOML config file
 
@@ -36,7 +36,7 @@ drover --host http://localhost:11434 "prompt"
 drover --system "you are a poet" "prompt"
 drover --temp 0.7 "prompt"
 drover --no-tools "prompt"
-drover --no-stream "prompt"
+drover --script-output "prompt"
 drover --verbose "prompt"
 
 drover --help
@@ -73,7 +73,7 @@ CLI flags override config values for the current invocation.
 - `--no-tools` disables tool prompting and ignores unprompted `TOOL:` output as plain model text
 - `--system` is a per-command override
 - `--verbose` prints request and timing details to `stderr`
-- `--no-stream` waits for the full response before printing and suppresses transient tool status updates
+- `--script-output` waits for the full response before printing and suppresses transient callbacks such as tool status updates
 
 ## Requirements
 
