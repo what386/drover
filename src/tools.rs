@@ -230,7 +230,7 @@ pub fn execute_tool_call(base_dir: &Path, call: &ToolCall) -> Result<String> {
 fn read_file(base_dir: &Path, path: &str) -> Result<String> {
     let resolved = resolve_path(base_dir, path)?;
     let content = fs::read_to_string(&resolved)
-        .with_context(|| format!("failed to read file: {}", resolved.display()))?;
+        .context(format!("failed to read file: {}", resolved.display()))?;
     Ok(truncate_output(
         format!(
             "READ {}\n{}",
@@ -244,7 +244,7 @@ fn read_file(base_dir: &Path, path: &str) -> Result<String> {
 fn list_path(base_dir: &Path, path: &str) -> Result<String> {
     let resolved = resolve_path(base_dir, path)?;
     let metadata = fs::metadata(&resolved)
-        .with_context(|| format!("failed to inspect path: {}", resolved.display()))?;
+        .context(format!("failed to inspect path: {}", resolved.display()))?;
 
     if metadata.is_file() {
         return Ok(format!(
@@ -254,9 +254,9 @@ fn list_path(base_dir: &Path, path: &str) -> Result<String> {
     }
 
     let mut entries = fs::read_dir(&resolved)
-        .with_context(|| format!("failed to list directory: {}", resolved.display()))?
+        .context(format!("failed to list directory: {}", resolved.display()))?
         .collect::<std::result::Result<Vec<_>, _>>()
-        .with_context(|| format!("failed to list directory: {}", resolved.display()))?;
+        .context(format!("failed to list directory: {}", resolved.display()))?;
     entries.sort_by_key(|e| e.file_name());
 
     let mut lines = vec![format!("LS {}", display_relative(base_dir, &resolved))];
@@ -272,7 +272,7 @@ fn list_path(base_dir: &Path, path: &str) -> Result<String> {
 fn stat_path(base_dir: &Path, path: &str) -> Result<String> {
     let resolved = resolve_path(base_dir, path)?;
     let metadata = fs::metadata(&resolved)
-        .with_context(|| format!("failed to inspect path: {}", resolved.display()))?;
+        .context(format!("failed to inspect path: {}", resolved.display()))?;
     let relative = display_relative(base_dir, &resolved);
     let path_type = if metadata.is_dir() { "DIR" } else { "FILE" };
     let modified = metadata
@@ -312,9 +312,9 @@ fn collect_tree(
     }
 
     let mut entries = fs::read_dir(path)
-        .with_context(|| format!("failed to list directory: {}", path.display()))?
+        .context(format!("failed to list directory: {}", path.display()))?
         .collect::<std::result::Result<Vec<_>, _>>()
-        .with_context(|| format!("failed to list directory: {}", path.display()))?;
+        .context(format!("failed to list directory: {}", path.display()))?;
     entries.sort_by_key(|e| e.file_name());
 
     let indent = "  ".repeat(depth + 1);
@@ -336,7 +336,7 @@ fn glob_paths(base_dir: &Path, pattern: &str) -> Result<String> {
     let matcher = GlobBuilder::new(pattern)
         .literal_separator(true)
         .build()
-        .with_context(|| format!("invalid glob pattern: {pattern}"))?
+        .context(format!("invalid glob pattern: {pattern}"))?
         .compile_matcher();
 
     let mut matches = Vec::new();
@@ -369,15 +369,15 @@ fn collect_glob_results(
     }
 
     let mut entries = fs::read_dir(path)
-        .with_context(|| format!("failed to list directory: {}", path.display()))?
+        .context(format!("failed to list directory: {}", path.display()))?
         .collect::<std::result::Result<Vec<_>, _>>()
-        .with_context(|| format!("failed to list directory: {}", path.display()))?;
+        .context(format!("failed to list directory: {}", path.display()))?;
     entries.sort_by_key(|e| e.file_name());
 
     for entry in entries {
         let entry_path = entry.path();
         let metadata = fs::metadata(&entry_path)
-            .with_context(|| format!("failed to inspect path: {}", entry_path.display()))?;
+            .context(format!("failed to inspect path: {}", entry_path.display()))?;
         let relative = display_relative(base_dir, &entry_path).replace('\\', "/");
 
         if matcher.is_match(&relative) {
@@ -435,14 +435,14 @@ fn collect_search_results(
         return Ok(());
     }
 
-    let metadata = fs::metadata(path)
-        .with_context(|| format!("failed to inspect path: {}", path.display()))?;
+    let metadata =
+        fs::metadata(path).context(format!("failed to inspect path: {}", path.display()))?;
 
     if metadata.is_dir() {
         let mut entries = fs::read_dir(path)
-            .with_context(|| format!("failed to list directory: {}", path.display()))?
+            .context(format!("failed to list directory: {}", path.display()))?
             .collect::<std::result::Result<Vec<_>, _>>()
-            .with_context(|| format!("failed to list directory: {}", path.display()))?;
+            .context(format!("failed to list directory: {}", path.display()))?;
         entries.sort_by_key(|e| e.file_name());
         for entry in entries {
             collect_search_results(base_dir, &entry.path(), pattern, matches, depth + 1)?;
@@ -480,8 +480,10 @@ fn collect_search_results(
 }
 
 fn environment_info(base_dir: &Path) -> Result<String> {
-    let cwd = fs::canonicalize(base_dir)
-        .with_context(|| format!("failed to resolve base directory: {}", base_dir.display()))?;
+    let cwd = fs::canonicalize(base_dir).context(format!(
+        "failed to resolve base directory: {}",
+        base_dir.display()
+    ))?;
 
     let mut lines = vec![
         "ENV".to_owned(),
@@ -543,11 +545,13 @@ fn resolve_path(base_dir: &Path, path: &str) -> Result<PathBuf> {
     if candidate.is_absolute() {
         bail!("absolute paths are not allowed");
     }
-    let base_dir = fs::canonicalize(base_dir)
-        .with_context(|| format!("failed to resolve base directory: {}", base_dir.display()))?;
+    let base_dir = fs::canonicalize(base_dir).context(format!(
+        "failed to resolve base directory: {}",
+        base_dir.display()
+    ))?;
     let joined = base_dir.join(candidate);
-    let resolved = fs::canonicalize(&joined)
-        .with_context(|| format!("path does not exist: {}", joined.display()))?;
+    let resolved =
+        fs::canonicalize(&joined).context(format!("path does not exist: {}", joined.display()))?;
     if !resolved.starts_with(&base_dir) {
         bail!("path escapes the workspace");
     }

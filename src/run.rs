@@ -138,17 +138,16 @@ impl Cli {
                 TurnOutcome::Tool { call, preamble } => {
                     if Self::should_write_tool_status(request) {
                         let mut stdout = io::stdout().lock();
-                        write!(stdout, "\r{}", Self::tool_status_message(&call))
-                            .context("failed to write tool status")?;
-                        stdout.flush().context("failed to flush tool status")?;
+                        let _ = write!(stdout, "\r{}", Self::tool_status_message(&call));
+                        let _ = stdout.flush();
                     }
 
                     let tool_result = execute_tool_call(&workspace_root, &call)?;
 
                     if Self::should_write_tool_status(request) {
                         let mut stdout = io::stdout().lock();
-                        write!(stdout, "{STATUS_CLEAR}").context("failed to clear tool status")?;
-                        stdout.flush().context("failed to flush tool status")?;
+                        let _ = write!(stdout, "{STATUS_CLEAR}");
+                        let _ = stdout.flush();
                     }
 
                     if !preamble.is_empty() {
@@ -204,7 +203,7 @@ impl Cli {
             });
         }
 
-        self.write_final_response(&response)?;
+        self.write_final_response(&response);
         Ok(TurnOutcome::Final(response))
     }
 
@@ -214,7 +213,7 @@ impl Cli {
         request: &GenerateRequest,
     ) -> Result<GenerateResponse> {
         let response = client.generate(request)?;
-        self.write_final_response(&response)?;
+        self.write_final_response(&response);
         Ok(response)
     }
 
@@ -229,10 +228,8 @@ impl Cli {
         let response = client.generate_streaming(request, |chunk| {
             let action = probe.ingest(&chunk.response, chunk.done)?;
             if !action.flush.is_empty() {
-                stdout
-                    .write_all(action.flush.as_bytes())
-                    .context("failed to write response to stdout")?;
-                stdout.flush().context("failed to flush stdout")?;
+                let _ = stdout.write_all(action.flush.as_bytes());
+                let _ = stdout.flush();
             }
             Ok(if action.stop {
                 StreamCallbackAction::Stop
@@ -245,10 +242,8 @@ impl Cli {
             StreamProbeResult::Tool { call, preamble } => Ok(TurnOutcome::Tool { call, preamble }),
             StreamProbeResult::PassThrough => {
                 if !response.response.ends_with('\n') {
-                    stdout
-                        .write_all(b"\n")
-                        .context("failed to write newline to stdout")?;
-                    stdout.flush().context("failed to flush stdout")?;
+                    let _ = stdout.write_all(b"\n");
+                    let _ = stdout.flush();
                 }
                 Ok(TurnOutcome::Final(response))
             }
@@ -263,19 +258,15 @@ impl Cli {
         let mut stdout = io::stdout().lock();
         let response = client.generate_streaming(request, |chunk| {
             if !chunk.response.is_empty() {
-                stdout
-                    .write_all(chunk.response.as_bytes())
-                    .context("failed to write response to stdout")?;
-                stdout.flush().context("failed to flush stdout")?;
+                let _ = stdout.write_all(chunk.response.as_bytes());
+                let _ = stdout.flush();
             }
             Ok(StreamCallbackAction::Continue)
         })?;
 
         if !response.response.ends_with('\n') {
-            stdout
-                .write_all(b"\n")
-                .context("failed to write newline to stdout")?;
-            stdout.flush().context("failed to flush stdout")?;
+            let _ = stdout.write_all(b"\n");
+            let _ = stdout.flush();
         }
 
         Ok(response)
@@ -310,18 +301,11 @@ impl Cli {
         }
     }
 
-    fn write_final_response(&self, response: &GenerateResponse) -> Result<()> {
-        let mut stdout = io::stdout().lock();
-        stdout
-            .write_all(response.response.as_bytes())
-            .context("failed to write response to stdout")?;
+    fn write_final_response(&self, response: &GenerateResponse) {
+        print!("{}", response.response);
         if !response.response.ends_with('\n') {
-            stdout
-                .write_all(b"\n")
-                .context("failed to write newline to stdout")?;
+            println!();
         }
-        stdout.flush().context("failed to flush stdout")?;
-        Ok(())
     }
 
     fn print_verbose(
@@ -333,33 +317,25 @@ impl Cli {
         response: &GenerateResponse,
         elapsed: Duration,
     ) -> Result<()> {
-        let mut stderr = io::stderr().lock();
-        writeln!(stderr, "host: {host}").context("failed to write verbose output")?;
-        writeln!(stderr, "model: {model}").context("failed to write verbose output")?;
-        writeln!(stderr, "script_output: {}", !request.stream)
-            .context("failed to write verbose output")?;
+        eprintln!("host: {host}");
+        eprintln!("model: {model}");
+        eprintln!("script_output: {}", !request.stream);
         if let Some(temp) = request.temp {
-            writeln!(stderr, "temp: {temp}").context("failed to write verbose output")?;
+            eprintln!("temp: {temp}");
         }
-        writeln!(stderr, "system_prompt:\n{effective_system_prompt}")
-            .context("failed to write verbose output")?;
-        writeln!(stderr, "elapsed_ms: {}", elapsed.as_millis())
-            .context("failed to write verbose output")?;
+        eprintln!("system_prompt:\n{effective_system_prompt}");
+        eprintln!("elapsed_ms: {}", elapsed.as_millis());
         if let Some(total_duration) = response.total_duration {
-            writeln!(stderr, "total_duration_ns: {total_duration}")
-                .context("failed to write verbose output")?;
+            eprintln!("total_duration_ns: {total_duration}");
         }
         if let Some(load_duration) = response.load_duration {
-            writeln!(stderr, "load_duration_ns: {load_duration}")
-                .context("failed to write verbose output")?;
+            eprintln!("load_duration_ns: {load_duration}");
         }
         if let Some(prompt_eval_count) = response.prompt_eval_count {
-            writeln!(stderr, "prompt_eval_count: {prompt_eval_count}")
-                .context("failed to write verbose output")?;
+            eprintln!("prompt_eval_count: {prompt_eval_count}");
         }
         if let Some(eval_count) = response.eval_count {
-            writeln!(stderr, "eval_count: {eval_count}")
-                .context("failed to write verbose output")?;
+            eprintln!("eval_count: {eval_count}");
         }
         Ok(())
     }
