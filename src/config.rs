@@ -20,12 +20,7 @@ impl Config {
     fn load_from_path(path: &Path) -> Result<Self> {
         match fs::read_to_string(path) {
             Ok(contents) => Self::parse(&contents),
-            // if not found, write defaults
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                let config = Self::default();
-                config.write_to_path(path)?;
-                Ok(config)
-            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(err) => Err(err).context(format!("failed to read config file: {}", path.display())),
         }
     }
@@ -41,26 +36,6 @@ impl Config {
         let temp = optional_float(table.get("temp"), "temp")?;
 
         Ok(Self { model, host, temp })
-    }
-
-    fn write_to_path(&self, path: &Path) -> Result<()> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).context(format!(
-                "failed to create config directory: {}",
-                parent.display()
-            ))?;
-        }
-
-        fs::write(path, self.to_toml())
-            .context(format!("failed to write config file: {}", path.display()))
-    }
-
-    fn to_toml(&self) -> String {
-        let model = self.model.as_deref().unwrap_or("");
-        let host = self.host.as_deref().unwrap_or("");
-        let temp = self.temp.unwrap_or_default();
-
-        format!("model = \"{model}\"\nhost = \"{host}\"\ntemp = {temp}\n")
     }
 }
 
