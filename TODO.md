@@ -11,6 +11,9 @@
 - [ ] fix status writeback to stdout
       @created 2026-04-05 19:23
 
+- [ ] rename --no-stream to --raw for scripting
+      @created 2026-04-05 19:23
+
 
 ## Completed
 
