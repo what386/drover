@@ -1,3 +1,9 @@
+pub mod cli;
+pub mod config;
+pub mod ollama;
+pub mod run;
+pub mod tools;
+
 use drover::cli::Cli;
 
 fn main() {
