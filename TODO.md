@@ -8,9 +8,6 @@
 - [ ] feat: Tool invocations (filesystem access, primarily)
       @created 2026-04-04 23:27
 
-- [ ] --host flag for overrriding url
-      @created 2026-04-05 00:32
-
 
 ## Completed
 
@@ -18,4 +15,8 @@
       @created 2026-04-04 23:49
       @completed 2026-04-04 23:49
       @completed_version 0.1.0
+
+- [x] --host flag for overrriding url
+      @created 2026-04-05 00:32
+      @completed 2026-04-05 00:32
 
