@@ -11,9 +11,6 @@
 - [ ] fix streamed output for tool-enabled mode
       @created 2026-04-05 20:02
 
-- [ ] rename --no-stream to --script-output for scripting
-      @created 2026-04-05 20:03
-
 
 ## Completed
 
@@ -35,4 +32,8 @@
 - [x] fix status writeback to stdout
       @created 2026-04-05 19:23
       @completed 2026-04-05 20:02
+
+- [x] rename --no-stream to --script-output for scripting
+      @created 2026-04-05 20:03
+      @completed 2026-04-05 20:05
 
