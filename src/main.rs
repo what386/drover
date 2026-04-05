@@ -4,13 +4,13 @@ pub mod ollama;
 pub mod run;
 pub mod tools;
 
-use cli::Cli;
+use cli::{Cli, HELP_TEXT};
 
 fn main() {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
 
     if args.iter().any(|arg| arg == "--help") {
-        println!("{}", Cli::help_text());
+        println!("{}", HELP_TEXT);
         return;
     }
 

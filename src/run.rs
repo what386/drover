@@ -1,4 +1,4 @@
-use crate::cli::Cli;
+use crate::cli::{Cli, HELP_TEXT};
 use crate::config::Config;
 use crate::ollama::{GenerateRequest, GenerateResponse, OllamaClient, StreamCallbackAction};
 use crate::tools::{
@@ -79,7 +79,7 @@ impl Cli {
             (None, Some(stdin)) => Ok(stdin),
             (None, None) => bail!(
                 "expected a prompt argument or piped stdin input\n\n{}",
-                Self::help_text()
+                HELP_TEXT
             ),
         }
     }
@@ -470,6 +470,7 @@ impl StreamProbe {
 #[cfg(test)]
 mod tests {
     use super::{Cli, StreamProbe, StreamProbeAction, StreamProbeResult};
+    use crate::cli::HELP_TEXT;
     use crate::config::Config;
     use crate::tools::ToolCall;
 
@@ -499,7 +500,7 @@ mod tests {
             err.to_string(),
             format!(
                 "expected a prompt argument or piped stdin input\n\n{}",
-                Cli::help_text()
+                HELP_TEXT
             )
         );
     }

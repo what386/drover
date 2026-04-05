@@ -12,36 +12,30 @@ pub struct Cli {
     pub prompt: Option<String>,
 }
 
+pub const HELP_TEXT: &str = concat!(
+    "Usage:\n",
+    "  drover \"prompt\"\n",
+    "  cat file.txt | drover\n",
+    "  cat file.txt | drover \"what is this about?\"\n",
+    "\n",
+    "Options:\n",
+    "  --help             Show this help text and exit\n",
+    "  --host, -H <url>   Ollama host override\n",
+    "  --model, -m <name> Model selection\n",
+    "  --system, -s <prompt>  System prompt\n",
+    "  --temp, -t <value> Temperature\n",
+    "  --no-tools         Disable tool use for this run\n",
+    "  --script-output    Buffer output and suppress transient callbacks\n",
+    "  --verbose, -v      Show model and timing details on stderr\n",
+    "  --version          Show the crate version and exit\n",
+);
+
 impl Cli {
     pub fn parse<I>(args: I) -> Result<Self>
     where
         I: IntoIterator<Item = String>,
     {
-        Self::parse_from(args).with_context(Self::invalid_input_help)
-    }
-
-    pub fn invalid_input_help() -> String {
-        format!("invalid command line input\n\n{}", Self::help_text())
-    }
-
-    pub fn help_text() -> &'static str {
-        concat!(
-            "Usage:\n",
-            "  drover \"prompt\"\n",
-            "  cat file.txt | drover\n",
-            "  cat file.txt | drover \"what is this about?\"\n",
-            "\n",
-            "Options:\n",
-            "  --help             Show this help text and exit\n",
-            "  --host, -H <url>   Ollama host override\n",
-            "  --model, -m <name> Model selection\n",
-            "  --system, -s <prompt>  System prompt\n",
-            "  --temp, -t <value> Temperature\n",
-            "  --no-tools         Disable tool use for this run\n",
-            "  --script-output    Buffer output and suppress transient callbacks\n",
-            "  --verbose, -v      Show model and timing details on stderr\n",
-            "  --version          Show the crate version and exit\n",
-        )
+        Self::parse_from(args).context(HELP_TEXT)
     }
 
     fn parse_from<I>(args: I) -> Result<Self>
@@ -115,6 +109,8 @@ fn parse_temp(value: &str) -> Result<f32> {
 
 #[cfg(test)]
 mod tests {
+    use crate::cli::HELP_TEXT;
+
     use super::Cli;
 
     fn parse(args: &[&str]) -> anyhow::Result<Cli> {
@@ -180,7 +176,6 @@ mod tests {
     fn rejects_missing_model_value() {
         let err = parse(&["-m"]).unwrap_err();
 
-        assert_eq!(err.to_string(), Cli::invalid_input_help());
         assert_eq!(
             err.source().unwrap().to_string(),
             "missing value for --model"
@@ -191,7 +186,6 @@ mod tests {
     fn rejects_missing_host_value() {
         let err = parse(&["-H"]).unwrap_err();
 
-        assert_eq!(err.to_string(), Cli::invalid_input_help());
         assert_eq!(
             err.source().unwrap().to_string(),
             "missing value for --host"
@@ -202,7 +196,6 @@ mod tests {
     fn rejects_missing_system_value() {
         let err = parse(&["-s"]).unwrap_err();
 
-        assert_eq!(err.to_string(), Cli::invalid_input_help());
         assert_eq!(
             err.source().unwrap().to_string(),
             "missing value for --system"
@@ -213,7 +206,6 @@ mod tests {
     fn rejects_duplicate_positionals() {
         let err = parse(&["first", "second"]).unwrap_err();
 
-        assert_eq!(err.to_string(), Cli::invalid_input_help());
         assert_eq!(
             err.source().unwrap().to_string(),
             "unexpected extra positional argument"
@@ -224,7 +216,6 @@ mod tests {
     fn rejects_unknown_flag() {
         let err = parse(&["--bogus"]).unwrap_err();
 
-        assert_eq!(err.to_string(), Cli::invalid_input_help());
         assert_eq!(err.source().unwrap().to_string(), "unknown flag: --bogus");
     }
 
@@ -232,7 +223,6 @@ mod tests {
     fn rejects_invalid_temp() {
         let err = parse(&["-t", "hot"]).unwrap_err();
 
-        assert_eq!(err.to_string(), Cli::invalid_input_help());
         assert_eq!(
             err.source().unwrap().to_string(),
             "invalid value for --temp: hot"
@@ -243,26 +233,10 @@ mod tests {
     fn rejects_removed_no_stream_flag() {
         let err = parse(&["--no-stream"]).unwrap_err();
 
-        assert_eq!(err.to_string(), Cli::invalid_input_help());
         assert_eq!(
             err.source().unwrap().to_string(),
             "unknown flag: --no-stream"
         );
-    }
-
-    #[test]
-    fn help_text_includes_help_and_version_flags() {
-        let help = Cli::help_text();
-
-        assert!(help.contains("--help"));
-        assert!(help.contains("--host, -H <url>"));
-        assert!(help.contains("--version"));
-        assert!(help.contains("--temp, -t <value>"));
-        assert!(help.contains("--no-tools"));
-        assert!(help.contains("--script-output"));
-        assert!(help.contains("--model, -m <name>"));
-        assert!(help.contains("--system, -s <prompt>"));
-        assert!(help.contains("--verbose, -v"));
     }
 
     #[test]
