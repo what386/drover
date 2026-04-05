@@ -173,6 +173,24 @@ pub fn parse_tool_call(output: &str) -> Result<Option<ToolCall>> {
     Ok(Some(call))
 }
 
+pub fn extract_tool_call(output: &str) -> Result<Option<ToolCall>> {
+    let mut last_call = None;
+
+    for line in output.lines() {
+        let trimmed = line.trim();
+        if !trimmed.starts_with("TOOL:") {
+            continue;
+        }
+
+        match parse_tool_call(trimmed) {
+            Ok(Some(call)) => last_call = Some(call),
+            Ok(None) | Err(_) => {}
+        }
+    }
+
+    Ok(last_call)
+}
+
 pub fn execute_tool_call(base_dir: &Path, call: &ToolCall) -> Result<String> {
     match call {
         ToolCall::Read { path } => read_file(base_dir, path),
@@ -565,7 +583,7 @@ fn truncate_output(mut output: String, context: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{ToolCall, execute_tool_call, parse_tool_call};
+    use super::{ToolCall, execute_tool_call, extract_tool_call, parse_tool_call};
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -714,6 +732,31 @@ mod tests {
     #[test]
     fn ignores_non_tool_output() {
         assert!(parse_tool_call("normal answer").unwrap().is_none());
+    }
+
+    #[test]
+    fn extracts_last_tool_call_from_multiline_response() {
+        let call = extract_tool_call("Thinking...\nTOOL: read|README.md\nTOOL: ls|src")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            call,
+            ToolCall::Ls {
+                path: "src".to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn ignores_inline_tool_text_when_extracting_tool_call() {
+        let call = extract_tool_call("I might use TOOL: read|README.md later.").unwrap();
+        assert!(call.is_none());
+    }
+
+    #[test]
+    fn ignores_invalid_tool_lines_when_extracting_tool_call() {
+        let call = extract_tool_call("TOOL: nope|README.md\nfinal answer").unwrap();
+        assert!(call.is_none());
     }
 
     #[test]
