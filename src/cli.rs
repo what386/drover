@@ -38,7 +38,7 @@ impl Cli {
             "  --system, -s <prompt>  System prompt\n",
             "  --temp, -t <value> Temperature\n",
             "  --no-tools         Disable tool use for this run\n",
-            "  --no-stream        Wait for the full response before printing\n",
+            "  --script-output    Buffer output and suppress transient callbacks\n",
             "  --verbose, -v      Show model and timing details on stderr\n",
             "  --version          Show the crate version and exit\n",
         )
@@ -75,7 +75,7 @@ impl Cli {
                     let value = next_value(&mut args, "--temp")?;
                     cli.temp = Some(parse_temp(&value)?);
                 }
-                "--no-stream" => {
+                "--script-output" => {
                     cli.stream = false;
                 }
                 "--no-tools" => {
@@ -152,7 +152,7 @@ mod tests {
             "http://localhost:11434",
             "-s",
             "you are a poet",
-            "--no-stream",
+            "--script-output",
             "--no-tools",
             "-v",
             "write a sonnet",
@@ -240,6 +240,17 @@ mod tests {
     }
 
     #[test]
+    fn rejects_removed_no_stream_flag() {
+        let err = parse(&["--no-stream"]).unwrap_err();
+
+        assert_eq!(err.to_string(), Cli::invalid_input_help());
+        assert_eq!(
+            err.source().unwrap().to_string(),
+            "unknown flag: --no-stream"
+        );
+    }
+
+    #[test]
     fn help_text_includes_help_and_version_flags() {
         let help = Cli::help_text();
 
@@ -248,6 +259,7 @@ mod tests {
         assert!(help.contains("--version"));
         assert!(help.contains("--temp, -t <value>"));
         assert!(help.contains("--no-tools"));
+        assert!(help.contains("--script-output"));
         assert!(help.contains("--model, -m <name>"));
         assert!(help.contains("--system, -s <prompt>"));
         assert!(help.contains("--verbose, -v"));

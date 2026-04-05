@@ -336,7 +336,8 @@ impl Cli {
         let mut stderr = io::stderr().lock();
         writeln!(stderr, "host: {host}").context("failed to write verbose output")?;
         writeln!(stderr, "model: {model}").context("failed to write verbose output")?;
-        writeln!(stderr, "stream: {}", request.stream).context("failed to write verbose output")?;
+        writeln!(stderr, "script_output: {}", !request.stream)
+            .context("failed to write verbose output")?;
         if let Some(temp) = request.temp {
             writeln!(stderr, "temp: {temp}").context("failed to write verbose output")?;
         }
