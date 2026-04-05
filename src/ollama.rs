@@ -34,6 +34,12 @@ pub struct GenerateChunk {
     pub model: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StreamCallbackAction {
+    Continue,
+    Stop,
+}
+
 impl OllamaClient {
     pub fn new(host: impl Into<String>) -> Self {
         Self {
@@ -55,45 +61,12 @@ impl OllamaClient {
         mut on_chunk: F,
     ) -> Result<GenerateResponse>
     where
-        F: FnMut(&GenerateChunk) -> Result<()>,
+        F: FnMut(&GenerateChunk) -> Result<StreamCallbackAction>,
     {
         let response = self
             .send_generate_request(request)
             .context("failed to call Ollama generate endpoint")?;
-
-        let mut reader = BufReader::new(response.into_reader());
-        let mut line = String::new();
-        let mut accumulated = String::new();
-        let mut final_response = None;
-
-        loop {
-            line.clear();
-            let bytes_read = reader
-                .read_line(&mut line)
-                .context("failed to read Ollama streaming response")?;
-            if bytes_read == 0 {
-                break;
-            }
-
-            if line.trim().is_empty() {
-                continue;
-            }
-
-            let parsed = parse_generate_json_line(line.trim_end())?;
-            if !parsed.chunk.done && parsed.chunk.response.is_empty() {
-                bail!("missing response content in Ollama stream chunk");
-            }
-
-            accumulated.push_str(&parsed.chunk.response);
-            on_chunk(&parsed.chunk)?;
-
-            if parsed.chunk.done {
-                final_response = Some(parsed.response.with_response(accumulated.clone()));
-                break;
-            }
-        }
-
-        final_response.ok_or_else(|| anyhow!("Ollama stream ended before a final done chunk"))
+        process_streaming_response(BufReader::new(response.into_reader()), &mut on_chunk)
     }
 
     fn send_generate_request(&self, request: &GenerateRequest) -> Result<ureq::Response> {
@@ -125,6 +98,18 @@ impl GenerateResponse {
     fn with_response(mut self, response: String) -> Self {
         self.response = response;
         self
+    }
+
+    fn partial(response: String, model: Option<String>) -> Self {
+        Self {
+            response,
+            done: false,
+            model,
+            total_duration: None,
+            load_duration: None,
+            prompt_eval_count: None,
+            eval_count: None,
+        }
     }
 }
 
@@ -221,12 +206,57 @@ struct ParsedChunk {
     response: GenerateResponse,
 }
 
+fn process_streaming_response<R, F>(mut reader: R, on_chunk: &mut F) -> Result<GenerateResponse>
+where
+    R: BufRead,
+    F: FnMut(&GenerateChunk) -> Result<StreamCallbackAction>,
+{
+    let mut line = String::new();
+    let mut accumulated = String::new();
+    let mut final_response = None;
+
+    loop {
+        line.clear();
+        let bytes_read = reader
+            .read_line(&mut line)
+            .context("failed to read Ollama streaming response")?;
+        if bytes_read == 0 {
+            break;
+        }
+
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        let parsed = parse_generate_json_line(line.trim_end())?;
+        if !parsed.chunk.done && parsed.chunk.response.is_empty() {
+            bail!("missing response content in Ollama stream chunk");
+        }
+
+        accumulated.push_str(&parsed.chunk.response);
+        if matches!(on_chunk(&parsed.chunk)?, StreamCallbackAction::Stop) {
+            return Ok(GenerateResponse::partial(
+                accumulated,
+                parsed.response.model.or(parsed.chunk.model),
+            ));
+        }
+
+        if parsed.chunk.done {
+            final_response = Some(parsed.response.with_response(accumulated.clone()));
+            break;
+        }
+    }
+
+    final_response.ok_or_else(|| anyhow!("Ollama stream ended before a final done chunk"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        GenerateRequest, build_generate_body, normalize_host, parse_generate_json_line,
-        parse_generate_response,
+        GenerateRequest, StreamCallbackAction, build_generate_body, normalize_host,
+        parse_generate_json_line, parse_generate_response, process_streaming_response,
     };
+    use std::io::Cursor;
 
     #[test]
     fn build_generate_body_omits_optional_fields_when_absent() {
@@ -355,5 +385,27 @@ mod tests {
             err.to_string(),
             "invalid `total_duration` in Ollama response"
         );
+    }
+
+    #[test]
+    fn process_streaming_response_allows_early_stop() {
+        let input = concat!(
+            "{\"model\":\"llama3\",\"response\":\"hel\",\"done\":false}\n",
+            "{\"model\":\"llama3\",\"response\":\"lo\",\"done\":false}\n",
+        );
+
+        let response = process_streaming_response(Cursor::new(input), &mut |chunk| {
+            if chunk.response == "hel" {
+                Ok(StreamCallbackAction::Stop)
+            } else {
+                Ok(StreamCallbackAction::Continue)
+            }
+        })
+        .unwrap();
+
+        assert_eq!(response.response, "hel");
+        assert!(!response.done);
+        assert_eq!(response.model.as_deref(), Some("llama3"));
+        assert_eq!(response.total_duration, None);
     }
 }
