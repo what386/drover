@@ -19,4 +19,5 @@
 - [x] --host flag for overrriding url
       @created 2026-04-05 00:32
       @completed 2026-04-05 00:32
+      @completed_version 0.1.1
 
