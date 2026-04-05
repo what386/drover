@@ -1,4 +1,4 @@
-# TODO — drover v0.3.0
+# TODO — drover v0.3.1
 
 @created: 2026-04-04
 @modified: 2026-04-05
@@ -19,4 +19,5 @@
 - [x] feat: No-tools mode #security #feature
       @created 2026-04-05 18:40
       @completed 2026-04-05 18:40
+      @completed_version 0.3.1
 
