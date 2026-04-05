@@ -67,7 +67,8 @@ CLI flags override config values for the current invocation.
 - `model` should match the exact Ollama model name you see in `ollama list`
 - `--host` overrides the configured Ollama server for a single run
 - if both stdin and a prompt are provided, the prompt is treated as the instruction and stdin is appended as `Input:` context
-- the model can request read-only tools using `TOOL: read <path>`, `TOOL: ls <path>`, and `TOOL: search <pattern> <path>`
+- the model can request read-only tools using `TOOL: read|<path>`, `TOOL: ls|<path>`, `TOOL: stat|<path>`, `TOOL: tree|<path>|<depth>`, `TOOL: glob|<pattern>`, `TOOL: search|<pattern>|<path>`, and `TOOL: env`
+- use `glob` to find files by name or extension, `search` to match file contents, `stat` to inspect metadata, and `env` to inspect execution context
 - `--system` is a per-command override
 - `--verbose` prints request and timing details to `stderr`
 - `--no-stream` waits for the full response before printing
