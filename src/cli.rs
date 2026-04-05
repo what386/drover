@@ -183,7 +183,10 @@ mod tests {
         let err = parse(&["-H"]).unwrap_err();
 
         assert_eq!(err.to_string(), Cli::invalid_input_help());
-        assert_eq!(err.source().unwrap().to_string(), "missing value for --host");
+        assert_eq!(
+            err.source().unwrap().to_string(),
+            "missing value for --host"
+        );
     }
 
     #[test]

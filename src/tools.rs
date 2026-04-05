@@ -1,8 +1,12 @@
 use anyhow::{Context, Result, anyhow, bail};
+use globset::{GlobBuilder, GlobMatcher};
 use std::fs;
 use std::path::{Path, PathBuf};
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 const MAX_TOOL_OUTPUT_BYTES: usize = 16 * 1024;
+const MAX_GLOB_MATCHES: usize = 500;
 const MAX_SEARCH_MATCHES: usize = 200;
 const MAX_SEARCH_DEPTH: usize = 8;
 
@@ -12,8 +16,11 @@ pub const TOOL_SYSTEM_PROMPT: &str = concat!(
     "To call a tool, respond with exactly one bare line (no prose, no fences):\n",
     "TOOL: read|<path>\n",
     "TOOL: ls|<path>\n",
+    "TOOL: stat|<path>\n",
     "TOOL: tree|<path>|<depth>\n",
+    "TOOL: glob|<pattern>\n",
     "TOOL: search|<pattern>|<path>\n",
+    "TOOL: env\n",
     "Paths must be relative. After receiving results, call another tool or answer normally.\n",
 );
 
@@ -21,8 +28,11 @@ pub const TOOL_SYSTEM_PROMPT: &str = concat!(
 pub enum ToolCall {
     Read { path: String },
     Ls { path: String },
+    Stat { path: String },
     Tree { path: String, depth: usize },
+    Glob { pattern: String },
     Search { pattern: String, path: String },
+    Env,
 }
 
 impl ToolCall {
@@ -30,8 +40,11 @@ impl ToolCall {
         match self {
             Self::Read { path } => format!("TOOL: read|{path}"),
             Self::Ls { path } => format!("TOOL: ls|{path}"),
+            Self::Stat { path } => format!("TOOL: stat|{path}"),
             Self::Tree { path, depth } => format!("TOOL: tree|{path}|{depth}"),
+            Self::Glob { pattern } => format!("TOOL: glob|{pattern}"),
             Self::Search { pattern, path } => format!("TOOL: search|{pattern}|{path}"),
+            Self::Env => "TOOL: env".to_owned(),
         }
     }
 }
@@ -42,7 +55,6 @@ pub fn parse_tool_call(output: &str) -> Result<Option<ToolCall>> {
         return Ok(None);
     }
 
-    // Strip "TOOL:" and split on '|' so paths/patterns can contain spaces.
     let body = trimmed["TOOL:".len()..].trim();
     let parts: Vec<&str> = body.splitn(4, '|').collect();
 
@@ -62,7 +74,9 @@ pub fn parse_tool_call(output: &str) -> Result<Option<ToolCall>> {
             if parts.get(2).is_some() {
                 bail!("too many arguments for `read` tool");
             }
-            ToolCall::Read { path: path.to_owned() }
+            ToolCall::Read {
+                path: path.to_owned(),
+            }
         }
         "ls" => {
             let path = parts
@@ -73,7 +87,22 @@ pub fn parse_tool_call(output: &str) -> Result<Option<ToolCall>> {
             if parts.get(2).is_some() {
                 bail!("too many arguments for `ls` tool");
             }
-            ToolCall::Ls { path: path.to_owned() }
+            ToolCall::Ls {
+                path: path.to_owned(),
+            }
+        }
+        "stat" => {
+            let path = parts
+                .get(1)
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow!("missing path for `stat` tool"))?;
+            if parts.get(2).is_some() {
+                bail!("too many arguments for `stat` tool");
+            }
+            ToolCall::Stat {
+                path: path.to_owned(),
+            }
         }
         "tree" => {
             let path = parts
@@ -92,7 +121,23 @@ pub fn parse_tool_call(output: &str) -> Result<Option<ToolCall>> {
             if parts.get(3).is_some() {
                 bail!("too many arguments for `tree` tool");
             }
-            ToolCall::Tree { path: path.to_owned(), depth }
+            ToolCall::Tree {
+                path: path.to_owned(),
+                depth,
+            }
+        }
+        "glob" => {
+            let pattern = parts
+                .get(1)
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow!("missing pattern for `glob` tool"))?;
+            if parts.get(2).is_some() {
+                bail!("too many arguments for `glob` tool");
+            }
+            ToolCall::Glob {
+                pattern: pattern.to_owned(),
+            }
         }
         "search" => {
             let pattern = parts
@@ -113,6 +158,12 @@ pub fn parse_tool_call(output: &str) -> Result<Option<ToolCall>> {
                 path: path.to_owned(),
             }
         }
+        "env" => {
+            if parts.get(1).is_some() {
+                bail!("too many arguments for `env` tool");
+            }
+            ToolCall::Env
+        }
         _ => bail!("unknown tool: {command}"),
     };
 
@@ -123,8 +174,11 @@ pub fn execute_tool_call(base_dir: &Path, call: &ToolCall) -> Result<String> {
     match call {
         ToolCall::Read { path } => read_file(base_dir, path),
         ToolCall::Ls { path } => list_path(base_dir, path),
+        ToolCall::Stat { path } => stat_path(base_dir, path),
         ToolCall::Tree { path, depth } => tree_path(base_dir, path, *depth),
+        ToolCall::Glob { pattern } => glob_paths(base_dir, pattern),
         ToolCall::Search { pattern, path } => search_path(base_dir, pattern, path),
+        ToolCall::Env => environment_info(base_dir),
     }
 }
 
@@ -133,7 +187,11 @@ fn read_file(base_dir: &Path, path: &str) -> Result<String> {
     let content = fs::read_to_string(&resolved)
         .with_context(|| format!("failed to read file: {}", resolved.display()))?;
     Ok(truncate_output(
-        format!("READ {}\n{}", display_relative(base_dir, &resolved), content),
+        format!(
+            "READ {}\n{}",
+            display_relative(base_dir, &resolved),
+            content
+        ),
         path,
     ))
 }
@@ -144,7 +202,10 @@ fn list_path(base_dir: &Path, path: &str) -> Result<String> {
         .with_context(|| format!("failed to inspect path: {}", resolved.display()))?;
 
     if metadata.is_file() {
-        return Ok(format!("LS {}\nFILE", display_relative(base_dir, &resolved)));
+        return Ok(format!(
+            "LS {}\nFILE",
+            display_relative(base_dir, &resolved)
+        ));
     }
 
     let mut entries = fs::read_dir(&resolved)
@@ -159,6 +220,30 @@ fn list_path(base_dir: &Path, path: &str) -> Result<String> {
         let kind = if entry.path().is_dir() { "DIR" } else { "FILE" };
         lines.push(format!("{kind} {name}"));
     }
+
+    Ok(truncate_output(lines.join("\n"), path))
+}
+
+fn stat_path(base_dir: &Path, path: &str) -> Result<String> {
+    let resolved = resolve_path(base_dir, path)?;
+    let metadata = fs::metadata(&resolved)
+        .with_context(|| format!("failed to inspect path: {}", resolved.display()))?;
+    let relative = display_relative(base_dir, &resolved);
+    let path_type = if metadata.is_dir() { "DIR" } else { "FILE" };
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(format_system_time)
+        .unwrap_or_else(|| "unknown".to_owned());
+
+    let lines = [
+        format!("STAT {relative}"),
+        format!("path: {relative}"),
+        format!("type: {path_type}"),
+        format!("size_bytes: {}", metadata.len()),
+        format!("modified_utc: {modified}"),
+        format!("permissions: {}", format_permissions(&metadata)),
+    ];
 
     Ok(truncate_output(lines.join("\n"), path))
 }
@@ -197,6 +282,76 @@ fn collect_tree(
             collect_tree(base_dir, &entry_path, depth + 1, max_depth, lines)?;
         } else {
             lines.push(format!("{indent}{name}"));
+        }
+    }
+
+    Ok(())
+}
+
+fn glob_paths(base_dir: &Path, pattern: &str) -> Result<String> {
+    let matcher = GlobBuilder::new(pattern)
+        .literal_separator(true)
+        .build()
+        .with_context(|| format!("invalid glob pattern: {pattern}"))?
+        .compile_matcher();
+
+    let mut matches = Vec::new();
+    collect_glob_results(base_dir, base_dir, &matcher, &mut matches)?;
+
+    if matches.is_empty() {
+        return Ok(format!("GLOB {pattern}\nNO MATCHES"));
+    }
+
+    let truncated = matches.len() == MAX_GLOB_MATCHES;
+    let mut lines = vec![format!("GLOB {pattern}")];
+    lines.extend(matches);
+    if truncated {
+        lines.push(format!(
+            "[stopped at {MAX_GLOB_MATCHES} matches — narrow your pattern]"
+        ));
+    }
+
+    Ok(truncate_output(lines.join("\n"), pattern))
+}
+
+fn collect_glob_results(
+    base_dir: &Path,
+    path: &Path,
+    matcher: &GlobMatcher,
+    matches: &mut Vec<String>,
+) -> Result<()> {
+    if matches.len() >= MAX_GLOB_MATCHES {
+        return Ok(());
+    }
+
+    let mut entries = fs::read_dir(path)
+        .with_context(|| format!("failed to list directory: {}", path.display()))?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .with_context(|| format!("failed to list directory: {}", path.display()))?;
+    entries.sort_by_key(|e| e.file_name());
+
+    for entry in entries {
+        let entry_path = entry.path();
+        let metadata = fs::metadata(&entry_path)
+            .with_context(|| format!("failed to inspect path: {}", entry_path.display()))?;
+        let relative = display_relative(base_dir, &entry_path).replace('\\', "/");
+
+        if matcher.is_match(&relative) {
+            if metadata.is_dir() {
+                matches.push(format!("{relative}/"));
+            } else {
+                matches.push(relative.clone());
+            }
+            if matches.len() >= MAX_GLOB_MATCHES {
+                return Ok(());
+            }
+        }
+
+        if metadata.is_dir() {
+            collect_glob_results(base_dir, &entry_path, matcher, matches)?;
+            if matches.len() >= MAX_GLOB_MATCHES {
+                return Ok(());
+            }
         }
     }
 
@@ -280,14 +435,61 @@ fn collect_search_results(
     Ok(())
 }
 
+fn environment_info(base_dir: &Path) -> Result<String> {
+    let cwd = fs::canonicalize(base_dir)
+        .with_context(|| format!("failed to resolve base directory: {}", base_dir.display()))?;
+
+    let mut lines = vec![
+        "ENV".to_owned(),
+        format!("cwd: {}", cwd.display()),
+        format!("os: {}", std::env::consts::OS),
+        format!("arch: {}", std::env::consts::ARCH),
+    ];
+
+    if let Some(shell) = std::env::var_os("SHELL") {
+        lines.push(format!("shell: {}", shell.to_string_lossy()));
+    }
+    if let Some(user) = std::env::var_os("USER") {
+        lines.push(format!("user: {}", user.to_string_lossy()));
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        lines.push(format!("home: {}", home.to_string_lossy()));
+    }
+    if let Some(path) = std::env::var_os("PATH") {
+        lines.push(format!("path: {}", path.to_string_lossy()));
+    }
+
+    Ok(truncate_output(lines.join("\n"), "env"))
+}
+
 fn is_likely_binary(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|e| e.to_str()),
         Some(
-            "png" | "jpg" | "jpeg" | "gif" | "bmp" | "ico" | "webp" |
-            "exe" | "dll" | "so" | "dylib" | "wasm" |
-            "pdf" | "zip" | "tar" | "gz" | "xz" | "bz2" | "7z" |
-            "lock" | "bin" | "dat" | "db" | "sqlite"
+            "png"
+                | "jpg"
+                | "jpeg"
+                | "gif"
+                | "bmp"
+                | "ico"
+                | "webp"
+                | "exe"
+                | "dll"
+                | "so"
+                | "dylib"
+                | "wasm"
+                | "pdf"
+                | "zip"
+                | "tar"
+                | "gz"
+                | "xz"
+                | "bz2"
+                | "7z"
+                | "lock"
+                | "bin"
+                | "dat"
+                | "db"
+                | "sqlite"
         )
     )
 }
@@ -315,13 +517,35 @@ fn display_relative(base_dir: &Path, path: &Path) -> String {
         .to_string()
 }
 
+fn format_system_time(time: std::time::SystemTime) -> Option<String> {
+    OffsetDateTime::from(time)
+        .to_offset(time::UtcOffset::UTC)
+        .format(&Rfc3339)
+        .ok()
+}
+
+fn format_permissions(metadata: &fs::Metadata) -> String {
+    let readonly = metadata.permissions().readonly();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        return format!(
+            "readonly={readonly}, mode={:o}",
+            metadata.permissions().mode() & 0o777
+        );
+    }
+    #[cfg(not(unix))]
+    {
+        format!("readonly={readonly}")
+    }
+}
+
 /// Truncate output to MAX_TOOL_OUTPUT_BYTES on a valid UTF-8 char boundary.
 fn truncate_output(mut output: String, context: &str) -> String {
     if output.len() <= MAX_TOOL_OUTPUT_BYTES {
         return output;
     }
     let original_len = output.len();
-    // Walk char boundaries to find the last one that fits.
     let boundary = output
         .char_indices()
         .map(|(i, _)| i)
@@ -344,30 +568,72 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    // --- parser ---
-
     #[test]
     fn parses_read_tool_call() {
         let call = parse_tool_call("TOOL: read|src/main.rs").unwrap().unwrap();
-        assert_eq!(call, ToolCall::Read { path: "src/main.rs".to_owned() });
+        assert_eq!(
+            call,
+            ToolCall::Read {
+                path: "src/main.rs".to_owned()
+            }
+        );
     }
 
     #[test]
     fn parses_ls_tool_call() {
         let call = parse_tool_call("TOOL: ls|.").unwrap().unwrap();
-        assert_eq!(call, ToolCall::Ls { path: ".".to_owned() });
+        assert_eq!(
+            call,
+            ToolCall::Ls {
+                path: ".".to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn parses_stat_tool_call() {
+        let call = parse_tool_call("TOOL: stat|src/main.rs").unwrap().unwrap();
+        assert_eq!(
+            call,
+            ToolCall::Stat {
+                path: "src/main.rs".to_owned()
+            }
+        );
     }
 
     #[test]
     fn parses_tree_tool_call() {
         let call = parse_tool_call("TOOL: tree|src|2").unwrap().unwrap();
-        assert_eq!(call, ToolCall::Tree { path: "src".to_owned(), depth: 2 });
+        assert_eq!(
+            call,
+            ToolCall::Tree {
+                path: "src".to_owned(),
+                depth: 2
+            }
+        );
     }
 
     #[test]
     fn parses_tree_default_depth() {
         let call = parse_tool_call("TOOL: tree|src").unwrap().unwrap();
-        assert_eq!(call, ToolCall::Tree { path: "src".to_owned(), depth: 3 });
+        assert_eq!(
+            call,
+            ToolCall::Tree {
+                path: "src".to_owned(),
+                depth: 3
+            }
+        );
+    }
+
+    #[test]
+    fn parses_glob_tool_call() {
+        let call = parse_tool_call("TOOL: glob|**/*.rs").unwrap().unwrap();
+        assert_eq!(
+            call,
+            ToolCall::Glob {
+                pattern: "**/*.rs".to_owned()
+            }
+        );
     }
 
     #[test]
@@ -375,23 +641,44 @@ mod tests {
         let call = parse_tool_call("TOOL: search|prompt|src").unwrap().unwrap();
         assert_eq!(
             call,
-            ToolCall::Search { pattern: "prompt".to_owned(), path: "src".to_owned() }
+            ToolCall::Search {
+                pattern: "prompt".to_owned(),
+                path: "src".to_owned()
+            }
         );
     }
 
     #[test]
     fn parses_search_with_spaces_in_pattern() {
-        let call = parse_tool_call("TOOL: search|my handler fn|src").unwrap().unwrap();
+        let call = parse_tool_call("TOOL: search|my handler fn|src")
+            .unwrap()
+            .unwrap();
         assert_eq!(
             call,
-            ToolCall::Search { pattern: "my handler fn".to_owned(), path: "src".to_owned() }
+            ToolCall::Search {
+                pattern: "my handler fn".to_owned(),
+                path: "src".to_owned()
+            }
         );
     }
 
     #[test]
+    fn parses_env_tool_call() {
+        let call = parse_tool_call("TOOL: env").unwrap().unwrap();
+        assert_eq!(call, ToolCall::Env);
+    }
+
+    #[test]
     fn parses_path_with_spaces() {
-        let call = parse_tool_call("TOOL: read|my dir/my file.rs").unwrap().unwrap();
-        assert_eq!(call, ToolCall::Read { path: "my dir/my file.rs".to_owned() });
+        let call = parse_tool_call("TOOL: read|my dir/my file.rs")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            call,
+            ToolCall::Read {
+                path: "my dir/my file.rs".to_owned()
+            }
+        );
     }
 
     #[test]
@@ -411,6 +698,12 @@ mod tests {
     }
 
     #[test]
+    fn rejects_extra_args_for_env() {
+        let err = parse_tool_call("TOOL: env|extra").unwrap_err();
+        assert_eq!(err.to_string(), "too many arguments for `env` tool");
+    }
+
+    #[test]
     fn rejects_unknown_tool() {
         let err = parse_tool_call("TOOL: write|foo.txt").unwrap_err();
         assert!(err.to_string().contains("unknown tool"));
@@ -425,10 +718,14 @@ mod tests {
     #[test]
     fn clamps_tree_depth_to_max() {
         let call = parse_tool_call("TOOL: tree|.|999").unwrap().unwrap();
-        assert_eq!(call, ToolCall::Tree { path: ".".to_owned(), depth: 8 });
+        assert_eq!(
+            call,
+            ToolCall::Tree {
+                path: ".".to_owned(),
+                depth: 8
+            }
+        );
     }
-
-    // --- executor ---
 
     #[test]
     fn executes_read_tool() {
@@ -436,8 +733,11 @@ mod tests {
         fs::write(root.join("note.txt"), "hello").unwrap();
         let output = execute_tool_call(
             &root,
-            &ToolCall::Read { path: "note.txt".to_owned() },
-        ).unwrap();
+            &ToolCall::Read {
+                path: "note.txt".to_owned(),
+            },
+        )
+        .unwrap();
         assert_eq!(output, "READ note.txt\nhello");
         cleanup(&root);
     }
@@ -449,10 +749,47 @@ mod tests {
         fs::write(root.join("src/main.rs"), "fn main() {}").unwrap();
         let output = execute_tool_call(
             &root,
-            &ToolCall::Ls { path: "src".to_owned() },
-        ).unwrap();
+            &ToolCall::Ls {
+                path: "src".to_owned(),
+            },
+        )
+        .unwrap();
         assert!(output.contains("LS src"));
         assert!(output.contains("FILE main.rs"));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn executes_stat_tool_for_file() {
+        let root = make_test_dir();
+        fs::write(root.join("note.txt"), "hello").unwrap();
+        let output = execute_tool_call(
+            &root,
+            &ToolCall::Stat {
+                path: "note.txt".to_owned(),
+            },
+        )
+        .unwrap();
+        assert!(output.contains("STAT note.txt"));
+        assert!(output.contains("type: FILE"));
+        assert!(output.contains("size_bytes: 5"));
+        assert!(output.contains("permissions: "));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn executes_stat_tool_for_directory() {
+        let root = make_test_dir();
+        fs::create_dir(root.join("src")).unwrap();
+        let output = execute_tool_call(
+            &root,
+            &ToolCall::Stat {
+                path: "src".to_owned(),
+            },
+        )
+        .unwrap();
+        assert!(output.contains("STAT src"));
+        assert!(output.contains("type: DIR"));
         cleanup(&root);
     }
 
@@ -464,8 +801,12 @@ mod tests {
         fs::write(root.join("Cargo.toml"), "").unwrap();
         let output = execute_tool_call(
             &root,
-            &ToolCall::Tree { path: ".".to_owned(), depth: 2 },
-        ).unwrap();
+            &ToolCall::Tree {
+                path: ".".to_owned(),
+                depth: 2,
+            },
+        )
+        .unwrap();
         assert!(output.contains("TREE"));
         assert!(output.contains("src/"));
         assert!(output.contains("main.rs"));
@@ -480,10 +821,53 @@ mod tests {
         fs::write(root.join("a/b/c/deep.rs"), "").unwrap();
         let output = execute_tool_call(
             &root,
-            &ToolCall::Tree { path: ".".to_owned(), depth: 2 },
-        ).unwrap();
+            &ToolCall::Tree {
+                path: ".".to_owned(),
+                depth: 2,
+            },
+        )
+        .unwrap();
         assert!(output.contains("b/"));
         assert!(!output.contains("deep.rs"));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn executes_glob_tool() {
+        let root = make_test_dir();
+        fs::create_dir_all(root.join("src/nested")).unwrap();
+        fs::write(root.join("src/main.rs"), "").unwrap();
+        fs::write(root.join("src/nested/lib.rs"), "").unwrap();
+        fs::write(root.join("Cargo.toml"), "").unwrap();
+        let output = execute_tool_call(
+            &root,
+            &ToolCall::Glob {
+                pattern: "**/*.rs".to_owned(),
+            },
+        )
+        .unwrap();
+        assert!(output.contains("GLOB **/*.rs"));
+        assert!(output.contains("src/main.rs"));
+        assert!(output.contains("src/nested/lib.rs"));
+        assert!(!output.contains("Cargo.toml"));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn glob_includes_hidden_files_and_directories() {
+        let root = make_test_dir();
+        fs::create_dir_all(root.join(".config")).unwrap();
+        fs::write(root.join(".env"), "").unwrap();
+        fs::write(root.join(".config/settings.toml"), "").unwrap();
+        let output = execute_tool_call(
+            &root,
+            &ToolCall::Glob {
+                pattern: "**/.*".to_owned(),
+            },
+        )
+        .unwrap();
+        assert!(output.contains(".config/"));
+        assert!(output.contains(".env"));
         cleanup(&root);
     }
 
@@ -494,8 +878,12 @@ mod tests {
         fs::write(root.join("src/main.rs"), "let prompt = 1;\n").unwrap();
         let output = execute_tool_call(
             &root,
-            &ToolCall::Search { pattern: "prompt".to_owned(), path: "src".to_owned() },
-        ).unwrap();
+            &ToolCall::Search {
+                pattern: "prompt".to_owned(),
+                path: "src".to_owned(),
+            },
+        )
+        .unwrap();
         assert!(output.contains("SEARCH prompt src"));
         assert!(output.contains("src/main.rs:1:let prompt = 1;"));
         cleanup(&root);
@@ -507,8 +895,12 @@ mod tests {
         fs::write(root.join("image.png"), "fake binary content with prompt").unwrap();
         let output = execute_tool_call(
             &root,
-            &ToolCall::Search { pattern: "prompt".to_owned(), path: ".".to_owned() },
-        ).unwrap();
+            &ToolCall::Search {
+                pattern: "prompt".to_owned(),
+                path: ".".to_owned(),
+            },
+        )
+        .unwrap();
         assert!(output.contains("NO MATCHES"));
         cleanup(&root);
     }
@@ -519,9 +911,24 @@ mod tests {
         fs::write(root.join("main.rs"), "let my var = 1;\n").unwrap();
         let output = execute_tool_call(
             &root,
-            &ToolCall::Search { pattern: "my var".to_owned(), path: ".".to_owned() },
-        ).unwrap();
+            &ToolCall::Search {
+                pattern: "my var".to_owned(),
+                path: ".".to_owned(),
+            },
+        )
+        .unwrap();
         assert!(output.contains("main.rs:1:let my var = 1;"));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn executes_env_tool() {
+        let root = make_test_dir();
+        let output = execute_tool_call(&root, &ToolCall::Env).unwrap();
+        assert!(output.contains("ENV"));
+        assert!(output.contains("cwd: "));
+        assert!(output.contains("os: "));
+        assert!(output.contains("arch: "));
         cleanup(&root);
     }
 
@@ -530,8 +937,11 @@ mod tests {
         let root = make_test_dir();
         let err = execute_tool_call(
             &root,
-            &ToolCall::Read { path: "../outside.txt".to_owned() },
-        ).unwrap_err();
+            &ToolCall::Read {
+                path: "../outside.txt".to_owned(),
+            },
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("path"));
         cleanup(&root);
     }
@@ -541,8 +951,11 @@ mod tests {
         let root = make_test_dir();
         let err = execute_tool_call(
             &root,
-            &ToolCall::Read { path: "/etc/passwd".to_owned() },
-        ).unwrap_err();
+            &ToolCall::Read {
+                path: "/etc/passwd".to_owned(),
+            },
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("absolute"));
         cleanup(&root);
     }

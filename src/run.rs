@@ -22,8 +22,12 @@ impl Cli {
         let effective_system_prompt = Self::effective_system_prompt(request.system.as_deref());
         let client = OllamaClient::new(host.clone());
         let started_at = Instant::now();
-        let final_response =
-            self.run_tool_loop(&client, &request, &effective_system_prompt, env::current_dir()?)?;
+        let final_response = self.run_tool_loop(
+            &client,
+            &request,
+            &effective_system_prompt,
+            env::current_dir()?,
+        )?;
 
         if self.verbose {
             self.print_verbose(
@@ -133,8 +137,7 @@ impl Cli {
 
                     let tool_result = execute_tool_call(&workspace_root, &call)?;
 
-                    write!(stderr, "{STATUS_CLEAR}")
-                        .context("failed to clear tool status")?;
+                    write!(stderr, "{STATUS_CLEAR}").context("failed to clear tool status")?;
                     stderr.flush().context("failed to flush tool status")?;
 
                     prompt.push_str("\n\nAssistant tool request:\n");
@@ -185,8 +188,9 @@ impl Cli {
 
         match probe.finish() {
             StreamProbeResult::Tool(buffer) => {
-                let call = parse_tool_call(&buffer)?
-                    .ok_or_else(|| anyhow!("tool-prefixed response did not parse as a tool call"))?;
+                let call = parse_tool_call(&buffer)?.ok_or_else(|| {
+                    anyhow!("tool-prefixed response did not parse as a tool call")
+                })?;
                 Ok(TurnOutcome::Tool(call))
             }
             StreamProbeResult::PassThrough => {
@@ -214,10 +218,13 @@ impl Cli {
 
     fn tool_status_message(call: &ToolCall) -> String {
         match call {
-            ToolCall::Ls{ path } => format!("* listing {path}..."),
-            ToolCall::Read{ path } => format!("* reading {path}..."),
+            ToolCall::Ls { path } => format!("* listing {path}..."),
+            ToolCall::Read { path } => format!("* reading {path}..."),
+            ToolCall::Stat { path } => format!("* stating {path}..."),
             ToolCall::Tree { path, .. } => format!("* walking {path}..."),
+            ToolCall::Glob { pattern } => format!("* globbing {pattern}..."),
             ToolCall::Search { pattern, path } => format!("* searching {path} for {pattern}..."),
+            ToolCall::Env => "* reading environment...".to_owned(),
         }
     }
 
@@ -376,7 +383,10 @@ mod tests {
             prompt: Some("prompt".to_owned()),
         };
 
-        assert_eq!(Cli::compose_prompt(cli.prompt.clone(), None).unwrap(), "prompt");
+        assert_eq!(
+            Cli::compose_prompt(cli.prompt.clone(), None).unwrap(),
+            "prompt"
+        );
     }
 
     #[test]
@@ -477,6 +487,12 @@ mod tests {
             path: "src/main.rs".to_owned(),
         });
         assert_eq!(msg, "* reading src/main.rs...");
+    }
+
+    #[test]
+    fn tool_status_message_handles_env_tool() {
+        let msg = Cli::tool_status_message(&crate::tools::ToolCall::Env);
+        assert_eq!(msg, "* reading environment...");
     }
 
     #[test]
