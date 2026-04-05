@@ -1,4 +1,4 @@
-# TODO — drover v0.3.1
+# TODO — drover v0.3.2
 
 @created: 2026-04-04
 @modified: 2026-04-05
@@ -24,4 +24,5 @@
 - [x] fix tool invocations so models can chain tools
       @created 2026-04-05 19:09
       @completed 2026-04-05 19:09
+      @completed_version 0.3.2
 
