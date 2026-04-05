@@ -3,26 +3,33 @@
 `drover` is a small CLI for sending prompts to a local Ollama instance.
 
 It supports:
-- prompt input as a positional argument
-- prompt input from `stdin`
-- combined prompt plus `stdin` context
-- model, system prompt, and temperature overrides
-- host override for one-off Ollama targets
-- interactive or script-friendly buffered output
-- read-only filesystem tool invocation during a run
-- a simple TOML config file
 
-## Build
+- Prompt input as a positional argument
+- Prompt input from `stdin`
+- Combined prompt plus `stdin` context
+- Model, system prompt, and temperature overrides
+- Host override for one-off Ollama targets
+- Interactive or script-friendly buffered output
+- Read-only filesystem tool invocation during a run
+- A simple TOML config file
 
-```bash
-cargo build
-```
+## Installation
 
-Run it with:
+1.  **Requirements:**
+    - A running Ollama instance ([https://ollama.com/](https://ollama.com/))
+    - At least one local Ollama model installed (via `ollama pull <model_name>`).
 
-```bash
-cargo run -- "Write a haiku about Rust"
-```
+2.  **Build:**
+
+    ```bash
+    cargo build
+    ```
+
+    Run it with:
+
+    ```bash
+    cargo run -- "Write a haiku about Rust"
+    ```
 
 ## Usage
 
@@ -51,7 +58,13 @@ drover --version
 ~/.config/drover/config.toml
 ```
 
-If the file does not exist, `drover` creates it with defaults.
+If the file does not exist, `drover` creates it with defaults:
+
+```toml
+model = "llama3"
+host = "http://localhost:11434"
+temp = 0.7
+```
 
 Example:
 
@@ -63,20 +76,22 @@ temp = 0.7
 
 CLI flags override config values for the current invocation.
 
-## Notes
+## Using Tools
 
-- `model` should match the exact Ollama model name you see in `ollama list`
-- `--host` overrides the configured Ollama server for a single run
-- if both stdin and a prompt are provided, the prompt is treated as the instruction and stdin is appended as `Input:` context
-- the model can request read-only tools using `TOOL: read|<path>`, `TOOL: ls|<path>`, `TOOL: stat|<path>`, `TOOL: tree|<path>|<depth>`, `TOOL: glob|<pattern>`, `TOOL: search|<pattern>|<path>`, and `TOOL: env`
-- use `glob` to find files by name or extension, `search` to match file contents, `stat` to inspect metadata, and `env` to inspect execution context
-- `--no-tools` disables tool prompting and ignores unprompted `TOOL:` output as plain model text
-- `--system` is a per-command override
-- `--verbose` prints request and timing details to `stderr`
-- `--script-output` waits for the full response before printing and suppresses transient callbacks such as tool status updates
+Drover allows the model to interact with the filesystem, searching, listing, and reading files. Useful tool outputs help improve generation quality. You can add command invocations within your prompt, like so: `TOOL: read|file.txt`. When provided, `drover` sends this invocation and presents the contents in subsequent prompt iterations until you ask the model to avoid tool invocations through `--no-tools`.
 
-## Requirements
+For example:
 
-- Rust and Cargo
-- a running Ollama instance
-- at least one local Ollama model installed
+```bash
+cat file.txt | drover "Summarize key points from this file"
+```
+
+This sends `file.txt` to Ollama and uses the contents in answering the prompt. It supports the following tools:
+
+- `TOOL: read|<path>`: Reads the contents of a file.
+- `TOOL: ls|<path>`: Lists the contents of a directory.
+- `TOOL: stat|<path>`: Returns metadata about a file (size, modified time, etc.).
+- `TOOL: tree|<path>|<depth>`: Recursively lists a directory structure up to a specified depth.
+- `TOOL: glob|<pattern>`: Finds files matching a pattern (e.g., `**.txt`).
+- `TOOL: search|<pattern>|<path>`: Searches for text within files.
+- `TOOL: env`: Lists environment variables.
