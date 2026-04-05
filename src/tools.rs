@@ -13,7 +13,8 @@ const MAX_SEARCH_DEPTH: usize = 8;
 pub const TOOL_SYSTEM_PROMPT: &str = concat!(
     "You are a local assistant with read-only filesystem tools.\n",
     "Never guess file or directory contents — always call a tool first.\n",
-    "To call a tool, respond with exactly one bare line (no prose, no fences):\n",
+    "You may think briefly in plain text before using a tool.\n",
+    "When you call a tool, put the actual invocation on its own standalone line:\n",
     "TOOL: read|<path>          # output the contents of one file\n",
     "TOOL: ls|<path>            # list immediate children of one directory\n",
     "TOOL: stat|<path>          # metadata: size, type, permissions, etc\n",
@@ -21,6 +22,7 @@ pub const TOOL_SYSTEM_PROMPT: &str = concat!(
     "TOOL: glob|<pattern>       # find paths matching a glob (e.g. **/*.rs)\n",
     "TOOL: search|<pattern>|<path> # grep-like search within files under <path>\n",
     "TOOL: env                  # show current environment variables\n",
+    "Anything after a tool line may be ignored.\n",
     "Paths must be relative. After receiving results, call another tool or answer normally.\n",
 );
 
@@ -47,6 +49,12 @@ impl ToolCall {
             Self::Env => "TOOL: env".to_owned(),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtractedToolCall {
+    pub preamble: String,
+    pub call: ToolCall,
 }
 
 pub fn parse_tool_call(output: &str) -> Result<Option<ToolCall>> {
@@ -173,22 +181,38 @@ pub fn parse_tool_call(output: &str) -> Result<Option<ToolCall>> {
     Ok(Some(call))
 }
 
-pub fn extract_tool_call(output: &str) -> Result<Option<ToolCall>> {
-    let mut last_call = None;
+pub fn extract_tool_call(output: &str) -> Result<Option<ExtractedToolCall>> {
+    let mut preamble = String::new();
 
-    for line in output.lines() {
-        let trimmed = line.trim();
-        if !trimmed.starts_with("TOOL:") {
-            continue;
-        }
-
+    for segment in output.split_inclusive('\n') {
+        let trimmed = segment.trim();
         match parse_tool_call(trimmed) {
-            Ok(Some(call)) => last_call = Some(call),
-            Ok(None) | Err(_) => {}
+            Ok(Some(call)) => return Ok(Some(ExtractedToolCall { preamble, call })),
+            Ok(None) | Err(_) => preamble.push_str(segment),
         }
     }
 
-    Ok(last_call)
+    if output.is_empty() || output.ends_with('\n') {
+        return Ok(None);
+    }
+
+    let trailing = output
+        .rsplit_once('\n')
+        .map(|(_, tail)| tail)
+        .unwrap_or(output);
+    if preamble.len() == output.len() {
+        return Ok(None);
+    }
+    match parse_tool_call(trailing.trim()) {
+        Ok(Some(call)) => {
+            let keep_len = output.len() - trailing.len();
+            Ok(Some(ExtractedToolCall {
+                preamble: output[..keep_len].to_owned(),
+                call,
+            }))
+        }
+        Ok(None) | Err(_) => Ok(None),
+    }
 }
 
 pub fn execute_tool_call(base_dir: &Path, call: &ToolCall) -> Result<String> {
@@ -583,7 +607,9 @@ fn truncate_output(mut output: String, context: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{ToolCall, execute_tool_call, extract_tool_call, parse_tool_call};
+    use super::{
+        ExtractedToolCall, ToolCall, execute_tool_call, extract_tool_call, parse_tool_call,
+    };
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -735,14 +761,17 @@ mod tests {
     }
 
     #[test]
-    fn extracts_last_tool_call_from_multiline_response() {
-        let call = extract_tool_call("Thinking...\nTOOL: read|README.md\nTOOL: ls|src")
+    fn extracts_first_tool_call_and_preamble_from_multiline_response() {
+        let extracted = extract_tool_call("Thinking...\nTOOL: read|README.md\nTOOL: ls|src")
             .unwrap()
             .unwrap();
         assert_eq!(
-            call,
-            ToolCall::Ls {
-                path: "src".to_owned()
+            extracted,
+            ExtractedToolCall {
+                preamble: "Thinking...\n".to_owned(),
+                call: ToolCall::Read {
+                    path: "README.md".to_owned()
+                }
             }
         );
     }
@@ -757,6 +786,22 @@ mod tests {
     fn ignores_invalid_tool_lines_when_extracting_tool_call() {
         let call = extract_tool_call("TOOL: nope|README.md\nfinal answer").unwrap();
         assert!(call.is_none());
+    }
+
+    #[test]
+    fn extracts_tool_call_after_invalid_tool_like_line() {
+        let extracted = extract_tool_call("TOOL: nope|README.md\nThinking...\nTOOL: ls|src")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            extracted,
+            ExtractedToolCall {
+                preamble: "TOOL: nope|README.md\nThinking...\n".to_owned(),
+                call: ToolCall::Ls {
+                    path: "src".to_owned()
+                }
+            }
+        );
     }
 
     #[test]

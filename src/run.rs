@@ -1,7 +1,9 @@
 use crate::cli::Cli;
 use crate::config::Config;
-use crate::ollama::{GenerateRequest, GenerateResponse, OllamaClient};
-use crate::tools::{TOOL_SYSTEM_PROMPT, ToolCall, execute_tool_call, extract_tool_call};
+use crate::ollama::{GenerateRequest, GenerateResponse, OllamaClient, StreamCallbackAction};
+use crate::tools::{
+    TOOL_SYSTEM_PROMPT, ToolCall, execute_tool_call, extract_tool_call, parse_tool_call,
+};
 use anyhow::{Context, Result, anyhow, bail};
 use std::env;
 use std::io::{self, IsTerminal, Read, Write};
@@ -133,16 +135,26 @@ impl Cli {
 
             match turn {
                 TurnOutcome::Final(response) => return Ok(response),
-                TurnOutcome::Tool(call) => {
-                    let mut stderr = io::stderr().lock();
-                    write!(stderr, "\r{}", Self::tool_status_message(&call))
-                        .context("failed to write tool status")?;
-                    stderr.flush().context("failed to flush tool status")?;
+                TurnOutcome::Tool { call, preamble } => {
+                    if Self::should_write_tool_status(request) {
+                        let mut stdout = io::stdout().lock();
+                        write!(stdout, "\r{}", Self::tool_status_message(&call))
+                            .context("failed to write tool status")?;
+                        stdout.flush().context("failed to flush tool status")?;
+                    }
 
                     let tool_result = execute_tool_call(&workspace_root, &call)?;
 
-                    write!(stderr, "{STATUS_CLEAR}").context("failed to clear tool status")?;
-                    stderr.flush().context("failed to flush tool status")?;
+                    if Self::should_write_tool_status(request) {
+                        let mut stdout = io::stdout().lock();
+                        write!(stdout, "{STATUS_CLEAR}").context("failed to clear tool status")?;
+                        stdout.flush().context("failed to flush tool status")?;
+                    }
+
+                    if !preamble.is_empty() {
+                        prompt.push_str("\n\nAssistant response before tool:\n");
+                        prompt.push_str(&preamble);
+                    }
 
                     prompt.push_str("\n\nAssistant tool request:\n");
                     prompt.push_str(&call.display());
@@ -185,8 +197,11 @@ impl Cli {
         request: &GenerateRequest,
     ) -> Result<TurnOutcome> {
         let response = client.generate(request)?;
-        if let Some(tool_call) = extract_tool_call(&response.response)? {
-            return Ok(TurnOutcome::Tool(tool_call));
+        if let Some(extracted) = extract_tool_call(&response.response)? {
+            return Ok(TurnOutcome::Tool {
+                call: extracted.call,
+                preamble: extracted.preamble,
+            });
         }
 
         self.write_final_response(&response)?;
@@ -208,20 +223,27 @@ impl Cli {
         client: &OllamaClient,
         request: &GenerateRequest,
     ) -> Result<TurnOutcome> {
+        let mut stdout = io::stdout().lock();
         let mut probe = StreamProbe::new();
 
         let response = client.generate_streaming(request, |chunk| {
-            probe.ingest(&chunk.response);
-            Ok(())
+            let action = probe.ingest(&chunk.response, chunk.done)?;
+            if !action.flush.is_empty() {
+                stdout
+                    .write_all(action.flush.as_bytes())
+                    .context("failed to write response to stdout")?;
+                stdout.flush().context("failed to flush stdout")?;
+            }
+            Ok(if action.stop {
+                StreamCallbackAction::Stop
+            } else {
+                StreamCallbackAction::Continue
+            })
         })?;
 
         match probe.finish()? {
-            StreamProbeResult::Tool(call) => Ok(TurnOutcome::Tool(call)),
-            StreamProbeResult::PassThrough(output) => {
-                let mut stdout = io::stdout().lock();
-                stdout
-                    .write_all(output.as_bytes())
-                    .context("failed to write response to stdout")?;
+            StreamProbeResult::Tool { call, preamble } => Ok(TurnOutcome::Tool { call, preamble }),
+            StreamProbeResult::PassThrough => {
                 if !response.response.ends_with('\n') {
                     stdout
                         .write_all(b"\n")
@@ -246,7 +268,7 @@ impl Cli {
                     .context("failed to write response to stdout")?;
                 stdout.flush().context("failed to flush stdout")?;
             }
-            Ok(())
+            Ok(StreamCallbackAction::Continue)
         })?;
 
         if !response.response.ends_with('\n') {
@@ -270,6 +292,10 @@ impl Cli {
 
     fn initial_tool_prompt(prompt: &str) -> String {
         format!("User request:\n{prompt}")
+    }
+
+    fn should_write_tool_status(request: &GenerateRequest) -> bool {
+        request.stream
     }
 
     fn tool_status_message(call: &ToolCall) -> String {
@@ -340,43 +366,133 @@ impl Cli {
 
 enum TurnOutcome {
     Final(GenerateResponse),
-    Tool(ToolCall),
+    Tool { call: ToolCall, preamble: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum StreamProbeResult {
-    PassThrough(String),
-    Tool(ToolCall),
+    PassThrough,
+    Tool { call: ToolCall, preamble: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StreamProbeAction {
+    flush: String,
+    stop: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct StreamProbe {
-    buffer: String,
+    line_state: StreamLineState,
+    line_buffer: String,
+    preamble: String,
+    tool_call: Option<ToolCall>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StreamLineState {
+    Candidate,
+    Passthrough,
 }
 
 impl StreamProbe {
     fn new() -> Self {
         Self {
-            buffer: String::new(),
+            line_state: StreamLineState::Candidate,
+            line_buffer: String::new(),
+            preamble: String::new(),
+            tool_call: None,
         }
     }
 
-    fn ingest(&mut self, text: &str) {
-        self.buffer.push_str(text);
+    fn ingest(&mut self, text: &str, done: bool) -> Result<StreamProbeAction> {
+        let mut flush = String::new();
+        let mut remaining = text;
+
+        while !remaining.is_empty() {
+            match self.line_state {
+                StreamLineState::Candidate => {
+                    let split_at = remaining
+                        .find('\n')
+                        .map(|idx| idx + 1)
+                        .unwrap_or(remaining.len());
+                    self.line_buffer.push_str(&remaining[..split_at]);
+                    remaining = &remaining[split_at..];
+
+                    if self.line_buffer.ends_with('\n') {
+                        let line = std::mem::take(&mut self.line_buffer);
+                        match parse_tool_call(line.trim()) {
+                            Ok(Some(call)) => {
+                                self.tool_call = Some(call);
+                                return Ok(StreamProbeAction { flush, stop: true });
+                            }
+                            Ok(None) | Err(_) => {
+                                flush.push_str(&line);
+                                self.preamble.push_str(&line);
+                            }
+                        }
+                    } else if !self.current_line_could_be_tool() {
+                        let line = std::mem::take(&mut self.line_buffer);
+                        flush.push_str(&line);
+                        self.preamble.push_str(&line);
+                        self.line_state = StreamLineState::Passthrough;
+                    }
+                }
+                StreamLineState::Passthrough => {
+                    let split_at = remaining
+                        .find('\n')
+                        .map(|idx| idx + 1)
+                        .unwrap_or(remaining.len());
+                    let segment = &remaining[..split_at];
+                    flush.push_str(segment);
+                    self.preamble.push_str(segment);
+                    remaining = &remaining[split_at..];
+
+                    if segment.ends_with('\n') {
+                        self.line_state = StreamLineState::Candidate;
+                    }
+                }
+            }
+        }
+
+        if done && !self.line_buffer.is_empty() {
+            let line = std::mem::take(&mut self.line_buffer);
+            match parse_tool_call(line.trim()) {
+                Ok(Some(call)) => {
+                    self.tool_call = Some(call);
+                    return Ok(StreamProbeAction { flush, stop: true });
+                }
+                Ok(None) | Err(_) => {
+                    flush.push_str(&line);
+                    self.preamble.push_str(&line);
+                    self.line_state = StreamLineState::Candidate;
+                }
+            }
+        }
+
+        Ok(StreamProbeAction { flush, stop: false })
+    }
+
+    fn current_line_could_be_tool(&self) -> bool {
+        let trimmed = self.line_buffer.trim_start();
+        trimmed.is_empty() || "TOOL:".starts_with(trimmed) || trimmed.starts_with("TOOL:")
     }
 
     fn finish(self) -> Result<StreamProbeResult> {
-        if let Some(call) = extract_tool_call(&self.buffer)? {
-            Ok(StreamProbeResult::Tool(call))
+        if let Some(call) = self.tool_call {
+            Ok(StreamProbeResult::Tool {
+                call,
+                preamble: self.preamble,
+            })
         } else {
-            Ok(StreamProbeResult::PassThrough(self.buffer))
+            Ok(StreamProbeResult::PassThrough)
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, StreamProbe, StreamProbeResult};
+    use super::{Cli, StreamProbe, StreamProbeAction, StreamProbeResult};
     use crate::config::Config;
     use crate::tools::ToolCall;
 
@@ -520,62 +636,181 @@ mod tests {
     }
 
     #[test]
+    fn writes_tool_status_only_when_streaming() {
+        let streaming = crate::ollama::GenerateRequest {
+            model: "llama3".to_owned(),
+            prompt: "prompt".to_owned(),
+            system: None,
+            temp: None,
+            stream: true,
+        };
+        let non_streaming = crate::ollama::GenerateRequest {
+            stream: false,
+            ..streaming.clone()
+        };
+
+        assert!(Cli::should_write_tool_status(&streaming));
+        assert!(!Cli::should_write_tool_status(&non_streaming));
+    }
+
+    #[test]
     fn stream_probe_passes_through_normal_output() {
         let mut probe = StreamProbe::new();
-        probe.ingest("Hello");
+        let action = probe.ingest("Hello", true).unwrap();
 
         assert_eq!(
-            probe.finish().unwrap(),
-            StreamProbeResult::PassThrough("Hello".to_owned())
+            action,
+            StreamProbeAction {
+                flush: "Hello".to_owned(),
+                stop: false
+            }
         );
+
+        assert_eq!(probe.finish().unwrap(), StreamProbeResult::PassThrough);
+    }
+
+    #[test]
+    fn stream_probe_flushes_after_tool_prefix_mismatch() {
+        let mut probe = StreamProbe::new();
+        let action = probe.ingest("T", false).unwrap();
+        assert_eq!(
+            action,
+            StreamProbeAction {
+                flush: String::new(),
+                stop: false
+            }
+        );
+
+        let action = probe.ingest("his repository", false).unwrap();
+        assert_eq!(
+            action,
+            StreamProbeAction {
+                flush: "This repository".to_owned(),
+                stop: false
+            }
+        );
+
+        assert_eq!(probe.finish().unwrap(), StreamProbeResult::PassThrough);
     }
 
     #[test]
     fn stream_probe_detects_split_tool_prefix() {
         let mut probe = StreamProbe::new();
-        probe.ingest("TOO");
-        probe.ingest("L: read|src/main.rs");
+        let action = probe.ingest("TOO", false).unwrap();
+        assert_eq!(
+            action,
+            StreamProbeAction {
+                flush: String::new(),
+                stop: false
+            }
+        );
+        let action = probe.ingest("L: read|src/main.rs", true).unwrap();
+        assert_eq!(
+            action,
+            StreamProbeAction {
+                flush: String::new(),
+                stop: true
+            }
+        );
         assert_eq!(
             probe.finish().unwrap(),
-            StreamProbeResult::Tool(ToolCall::Read {
-                path: "src/main.rs".to_owned()
-            })
+            StreamProbeResult::Tool {
+                call: ToolCall::Read {
+                    path: "src/main.rs".to_owned()
+                },
+                preamble: String::new()
+            }
         );
     }
 
     #[test]
     fn stream_probe_uses_later_standalone_tool_line() {
         let mut probe = StreamProbe::new();
-        probe.ingest("I should inspect the README first.\n");
-        probe.ingest("TOOL: read|README.md");
+        let action = probe
+            .ingest("I should inspect the README first.\n", false)
+            .unwrap();
+        assert_eq!(
+            action,
+            StreamProbeAction {
+                flush: "I should inspect the README first.\n".to_owned(),
+                stop: false
+            }
+        );
+        let action = probe.ingest("TOOL: read|README.md", true).unwrap();
+        assert_eq!(
+            action,
+            StreamProbeAction {
+                flush: String::new(),
+                stop: true
+            }
+        );
 
         assert_eq!(
             probe.finish().unwrap(),
-            StreamProbeResult::Tool(ToolCall::Read {
-                path: "README.md".to_owned()
-            })
+            StreamProbeResult::Tool {
+                call: ToolCall::Read {
+                    path: "README.md".to_owned()
+                },
+                preamble: "I should inspect the README first.\n".to_owned()
+            }
         );
     }
 
     #[test]
     fn stream_probe_ignores_inline_tool_text() {
         let mut probe = StreamProbe::new();
-        probe.ingest("I could say TOOL: read|README.md later.");
+        let action = probe
+            .ingest("I could say TOOL: read|README.md later.", true)
+            .unwrap();
 
         assert_eq!(
-            probe.finish().unwrap(),
-            StreamProbeResult::PassThrough("I could say TOOL: read|README.md later.".to_owned())
+            action,
+            StreamProbeAction {
+                flush: "I could say TOOL: read|README.md later.".to_owned(),
+                stop: false
+            }
         );
+
+        assert_eq!(probe.finish().unwrap(), StreamProbeResult::PassThrough);
     }
 
     #[test]
     fn stream_probe_ignores_invalid_tool_line() {
         let mut probe = StreamProbe::new();
-        probe.ingest("TOOL: nope|README.md");
+        let action = probe.ingest("TOOL: nope|README.md", true).unwrap();
 
         assert_eq!(
+            action,
+            StreamProbeAction {
+                flush: "TOOL: nope|README.md".to_owned(),
+                stop: false
+            }
+        );
+        assert_eq!(probe.finish().unwrap(), StreamProbeResult::PassThrough);
+    }
+
+    #[test]
+    fn stream_probe_discards_trailing_bytes_after_tool_line() {
+        let mut probe = StreamProbe::new();
+        let action = probe
+            .ingest("Thinking...\nTOOL: read|README.md\nignored", false)
+            .unwrap();
+
+        assert_eq!(
+            action,
+            StreamProbeAction {
+                flush: "Thinking...\n".to_owned(),
+                stop: true
+            }
+        );
+        assert_eq!(
             probe.finish().unwrap(),
-            StreamProbeResult::PassThrough("TOOL: nope|README.md".to_owned())
+            StreamProbeResult::Tool {
+                call: ToolCall::Read {
+                    path: "README.md".to_owned()
+                },
+                preamble: "Thinking...\n".to_owned()
+            }
         );
     }
 }
