@@ -4,7 +4,7 @@ pub mod ollama;
 pub mod run;
 pub mod tools;
 
-use drover::cli::Cli;
+use cli::Cli;
 
 fn main() {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
