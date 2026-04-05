@@ -109,8 +109,6 @@ fn parse_temp(value: &str) -> Result<f32> {
 
 #[cfg(test)]
 mod tests {
-    use crate::cli::HELP_TEXT;
-
     use super::Cli;
 
     fn parse(args: &[&str]) -> anyhow::Result<Cli> {
