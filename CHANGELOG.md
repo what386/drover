@@ -2,6 +2,15 @@
 
 *Generated on 2026-04-05*
 
+## 0.4.0 — 2026-04-05
+
+### Changes
+
+- fix status writeback to stdout
+- rename --no-stream to --script-output for scripting
+- fix streamed output for tool-enabled mode
+
+
 ## 0.3.2 — 2026-04-05
 
 ### Changes
