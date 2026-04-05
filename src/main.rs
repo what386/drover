@@ -1,10 +1,4 @@
-mod cli;
-mod config;
-mod ollama;
-mod run;
-mod tools;
-
-use cli::Cli;
+use drover::cli::Cli;
 
 fn main() {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
