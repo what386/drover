@@ -6,6 +6,7 @@ It supports:
 - prompt input as a positional argument
 - prompt input from `stdin`
 - model, system prompt, and temperature overrides
+- host override for one-off Ollama targets
 - streaming or non-streaming output
 - a simple TOML config file
 
@@ -28,6 +29,7 @@ drover "prompt"
 cat file.txt | drover
 
 drover --model llama3 "prompt"
+drover --host http://localhost:11434 "prompt"
 drover --system "you are a poet" "prompt"
 drover --temp 0.7 "prompt"
 drover --no-stream "prompt"
@@ -60,6 +62,7 @@ CLI flags override config values for the current invocation.
 ## Notes
 
 - `model` should match the exact Ollama model name you see in `ollama list`
+- `--host` overrides the configured Ollama server for a single run
 - `--system` is a per-command override
 - `--verbose` prints request and timing details to `stderr`
 - `--no-stream` waits for the full response before printing

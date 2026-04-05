@@ -1,14 +1,19 @@
 [package]
 name = "drover"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-description = "Fetch package updates directly from the source."
+description = "Prompt ollama like a unix tool- simple and scriptable."
 repository = "https://github.com/what386/drover"
 keywords = ["llm", "ollama", "local"]
 categories = ["command-line-utilities", "artificial-intelligence"]
 
+exclude = [
+    ".github",
+    ".tally",
+    "scripts/",
+]
 
 [dependencies]
 anyhow = "1.0.102"
