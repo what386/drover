@@ -2,6 +2,13 @@
 
 *Generated on 2026-04-05*
 
+## 0.3.2 — 2026-04-05
+
+### Changes
+
+- fix tool invocations so models can chain tools
+
+
 ## 0.3.1 — 2026-04-05
 
 ### Changes
