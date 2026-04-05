@@ -8,9 +8,6 @@
 - [ ] feat: Tool invocations (filesystem access, primarily)
       @created 2026-04-04 23:27
 
-- [ ] file + prompt feature
-      @created 2026-04-05 01:12
-
 
 ## Completed
 
@@ -23,4 +20,8 @@
       @created 2026-04-05 00:32
       @completed 2026-04-05 00:32
       @completed_version 0.1.1
+
+- [x] file + prompt feature
+      @created 2026-04-05 01:12
+      @completed 2026-04-05 01:12
 
