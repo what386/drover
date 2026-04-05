@@ -2,6 +2,13 @@
 
 *Generated on 2026-04-05*
 
+## 0.3.1 — 2026-04-05
+
+### Changes
+
+- feat: No-tools mode `security`, `feature`
+
+
 ## 0.3.0 — 2026-04-05
 
 ### Changes
