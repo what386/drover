@@ -2,6 +2,7 @@ mod cli;
 mod config;
 mod ollama;
 mod run;
+mod tools;
 
 use cli::Cli;
 

@@ -1,9 +1,15 @@
 use crate::cli::Cli;
 use crate::config::Config;
-use crate::ollama::{GenerateChunk, GenerateRequest, GenerateResponse, OllamaClient};
+use crate::ollama::{GenerateRequest, GenerateResponse, OllamaClient};
+use crate::tools::{TOOL_SYSTEM_PROMPT, ToolCall, execute_tool_call, parse_tool_call};
 use anyhow::{Context, Result, anyhow, bail};
+use std::env;
 use std::io::{self, IsTerminal, Read, Write};
 use std::time::{Duration, Instant};
+
+const MAX_TOOL_STEPS: usize = 8;
+const TOOL_PREFIX: &str = "TOOL:";
+const STATUS_CLEAR: &str = "\r\x1b[2K";
 
 impl Cli {
     pub fn run(self) -> Result<()> {
@@ -13,17 +19,21 @@ impl Cli {
         let request = self.build_request(&config, prompt)?;
         let host = self.resolve_host(&config)?;
         let model = request.model.clone();
+        let effective_system_prompt = Self::effective_system_prompt(request.system.as_deref());
         let client = OllamaClient::new(host.clone());
         let started_at = Instant::now();
-
-        let response = if request.stream {
-            self.run_streaming(&client, &request)?
-        } else {
-            self.run_non_streaming(&client, &request)?
-        };
+        let final_response =
+            self.run_tool_loop(&client, &request, &effective_system_prompt, env::current_dir()?)?;
 
         if self.verbose {
-            self.print_verbose(&host, &model, &request, &response, started_at.elapsed())?;
+            self.print_verbose(
+                &host,
+                &model,
+                &request,
+                &effective_system_prompt,
+                &final_response,
+                started_at.elapsed(),
+            )?;
         }
 
         Ok(())
@@ -89,12 +99,129 @@ impl Cli {
             .ok_or_else(|| anyhow!("config is missing `host`"))
     }
 
-    fn run_non_streaming(
+    fn run_tool_loop(
         &self,
         client: &OllamaClient,
         request: &GenerateRequest,
+        effective_system_prompt: &str,
+        workspace_root: std::path::PathBuf,
     ) -> Result<GenerateResponse> {
+        let mut prompt = Self::initial_tool_prompt(&request.prompt);
+
+        for _ in 0..MAX_TOOL_STEPS {
+            let step_request = GenerateRequest {
+                model: request.model.clone(),
+                prompt: prompt.clone(),
+                system: Some(effective_system_prompt.to_owned()),
+                temp: request.temp,
+                stream: request.stream,
+            };
+
+            let turn = if request.stream {
+                self.run_streaming_turn(client, &step_request)?
+            } else {
+                self.run_non_streaming_turn(client, &step_request)?
+            };
+
+            match turn {
+                TurnOutcome::Final(response) => return Ok(response),
+                TurnOutcome::Tool(call) => {
+                    let mut stderr = io::stderr().lock();
+                    write!(stderr, "\r{}", Self::tool_status_message(&call))
+                        .context("failed to write tool status")?;
+                    stderr.flush().context("failed to flush tool status")?;
+
+                    let tool_result = execute_tool_call(&workspace_root, &call)?;
+
+                    write!(stderr, "{STATUS_CLEAR}")
+                        .context("failed to clear tool status")?;
+                    stderr.flush().context("failed to flush tool status")?;
+
+                    prompt.push_str("\n\nAssistant tool request:\n");
+                    prompt.push_str(&call.display());
+                    prompt.push_str("\n\nTool result:\n");
+                    prompt.push_str(&tool_result);
+                    prompt.push_str(
+                        "\n\nContinue. Use another TOOL line if needed, otherwise answer normally.",
+                    );
+                }
+            }
+        }
+
+        bail!("tool loop exceeded maximum step count")
+    }
+
+    fn run_non_streaming_turn(
+        &self,
+        client: &OllamaClient,
+        request: &GenerateRequest,
+    ) -> Result<TurnOutcome> {
         let response = client.generate(request)?;
+        if let Some(tool_call) = parse_tool_call(&response.response)? {
+            return Ok(TurnOutcome::Tool(tool_call));
+        }
+
+        self.write_final_response(&response)?;
+        Ok(TurnOutcome::Final(response))
+    }
+
+    fn run_streaming_turn(
+        &self,
+        client: &OllamaClient,
+        request: &GenerateRequest,
+    ) -> Result<TurnOutcome> {
+        let mut stdout = io::stdout().lock();
+        let mut probe = StreamProbe::new();
+
+        let response = client.generate_streaming(request, |chunk| {
+            if let Some(output) = probe.ingest(&chunk.response, chunk.done) {
+                stdout
+                    .write_all(output.as_bytes())
+                    .context("failed to write response to stdout")?;
+                stdout.flush().context("failed to flush stdout")?;
+            }
+            Ok(())
+        })?;
+
+        match probe.finish() {
+            StreamProbeResult::Tool(buffer) => {
+                let call = parse_tool_call(&buffer)?
+                    .ok_or_else(|| anyhow!("tool-prefixed response did not parse as a tool call"))?;
+                Ok(TurnOutcome::Tool(call))
+            }
+            StreamProbeResult::PassThrough => {
+                if !response.response.ends_with('\n') {
+                    stdout
+                        .write_all(b"\n")
+                        .context("failed to write newline to stdout")?;
+                    stdout.flush().context("failed to flush stdout")?;
+                }
+                Ok(TurnOutcome::Final(response))
+            }
+        }
+    }
+
+    fn effective_system_prompt(existing: Option<&str>) -> String {
+        match existing {
+            Some(existing) => format!("{existing}\n\n{TOOL_SYSTEM_PROMPT}"),
+            None => TOOL_SYSTEM_PROMPT.to_owned(),
+        }
+    }
+
+    fn initial_tool_prompt(prompt: &str) -> String {
+        format!("User request:\n{prompt}")
+    }
+
+    fn tool_status_message(call: &ToolCall) -> String {
+        match call {
+            ToolCall::Ls{ path } => format!("* listing {path}..."),
+            ToolCall::Read{ path } => format!("* reading {path}..."),
+            ToolCall::Tree { path, .. } => format!("* walking {path}..."),
+            ToolCall::Search { pattern, path } => format!("* searching {path} for {pattern}..."),
+        }
+    }
+
+    fn write_final_response(&self, response: &GenerateResponse) -> Result<()> {
         let mut stdout = io::stdout().lock();
         stdout
             .write_all(response.response.as_bytes())
@@ -105,33 +232,7 @@ impl Cli {
                 .context("failed to write newline to stdout")?;
         }
         stdout.flush().context("failed to flush stdout")?;
-        Ok(response)
-    }
-
-    fn run_streaming(
-        &self,
-        client: &OllamaClient,
-        request: &GenerateRequest,
-    ) -> Result<GenerateResponse> {
-        let mut stdout = io::stdout().lock();
-        let response = client.generate_streaming(request, |chunk: &GenerateChunk| {
-            if !chunk.response.is_empty() {
-                stdout
-                    .write_all(chunk.response.as_bytes())
-                    .context("failed to write response chunk to stdout")?;
-                stdout.flush().context("failed to flush stdout")?;
-            }
-            Ok(())
-        })?;
-
-        if !response.response.ends_with('\n') {
-            stdout
-                .write_all(b"\n")
-                .context("failed to write newline to stdout")?;
-            stdout.flush().context("failed to flush stdout")?;
-        }
-
-        Ok(response)
+        Ok(())
     }
 
     fn print_verbose(
@@ -139,6 +240,7 @@ impl Cli {
         host: &str,
         model: &str,
         request: &GenerateRequest,
+        effective_system_prompt: &str,
         response: &GenerateResponse,
         elapsed: Duration,
     ) -> Result<()> {
@@ -149,6 +251,8 @@ impl Cli {
         if let Some(temp) = request.temp {
             writeln!(stderr, "temp: {temp}").context("failed to write verbose output")?;
         }
+        writeln!(stderr, "system_prompt:\n{effective_system_prompt}")
+            .context("failed to write verbose output")?;
         writeln!(stderr, "elapsed_ms: {}", elapsed.as_millis())
             .context("failed to write verbose output")?;
         if let Some(total_duration) = response.total_duration {
@@ -171,9 +275,93 @@ impl Cli {
     }
 }
 
+enum TurnOutcome {
+    Final(GenerateResponse),
+    Tool(ToolCall),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ProbeMode {
+    Pending(String),
+    PassThrough,
+    ToolCapture(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum StreamProbeResult {
+    PassThrough,
+    Tool(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StreamProbe {
+    mode: ProbeMode,
+}
+
+impl StreamProbe {
+    fn new() -> Self {
+        Self {
+            mode: ProbeMode::Pending(String::new()),
+        }
+    }
+
+    fn ingest(&mut self, text: &str, done: bool) -> Option<String> {
+        let mut flushed = None;
+
+        match &mut self.mode {
+            ProbeMode::PassThrough => {
+                if !text.is_empty() {
+                    flushed = Some(text.to_owned());
+                }
+            }
+            ProbeMode::ToolCapture(buffer) => {
+                buffer.push_str(text);
+            }
+            ProbeMode::Pending(buffer) => {
+                buffer.push_str(text);
+                if buffer.len() <= TOOL_PREFIX.len() && TOOL_PREFIX.starts_with(buffer.as_str()) {
+                    if buffer.len() == TOOL_PREFIX.len() {
+                        let captured = buffer.clone();
+                        self.mode = ProbeMode::ToolCapture(captured);
+                    }
+                } else if buffer.starts_with(TOOL_PREFIX) {
+                    let captured = buffer.clone();
+                    self.mode = ProbeMode::ToolCapture(captured);
+                } else {
+                    let output = buffer.clone();
+                    self.mode = ProbeMode::PassThrough;
+                    flushed = Some(output);
+                }
+            }
+        }
+
+        if done {
+            if let ProbeMode::Pending(buffer) = &mut self.mode {
+                if !buffer.is_empty() {
+                    let output = buffer.clone();
+                    self.mode = ProbeMode::PassThrough;
+                    match flushed {
+                        Some(existing) => flushed = Some(existing + &output),
+                        None => flushed = Some(output),
+                    }
+                }
+            }
+        }
+
+        flushed
+    }
+
+    fn finish(self) -> StreamProbeResult {
+        match self.mode {
+            ProbeMode::ToolCapture(buffer) => StreamProbeResult::Tool(buffer),
+            ProbeMode::Pending(_) | ProbeMode::PassThrough => StreamProbeResult::PassThrough,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::cli::Cli;
+    use super::{Cli, ProbeMode, StreamProbe, StreamProbeResult};
     use crate::config::Config;
 
     #[test]
@@ -266,5 +454,70 @@ mod tests {
         assert_eq!(request.temp, Some(0.7));
         assert!(request.stream);
         assert_eq!(cli.resolve_host(&config).unwrap(), "http://localhost:11434");
+    }
+
+    #[test]
+    fn effective_system_prompt_appends_tool_instructions() {
+        let prompt = Cli::effective_system_prompt(Some("be concise"));
+        assert!(prompt.contains("be concise"));
+        assert!(prompt.contains("TOOL: read"));
+    }
+
+    #[test]
+    fn initial_tool_prompt_wraps_user_request() {
+        assert_eq!(
+            Cli::initial_tool_prompt("summarize this"),
+            "User request:\nsummarize this"
+        );
+    }
+
+    #[test]
+    fn tool_status_message_is_human_readable() {
+        let msg = Cli::tool_status_message(&crate::tools::ToolCall::Read {
+            path: "src/main.rs".to_owned(),
+        });
+        assert_eq!(msg, "* reading src/main.rs...");
+    }
+
+    #[test]
+    fn stream_probe_passes_through_normal_output_immediately() {
+        let mut probe = StreamProbe::new();
+        let flushed = probe.ingest("Hello", false);
+
+        assert_eq!(flushed.as_deref(), Some("Hello"));
+        assert_eq!(probe.mode, ProbeMode::PassThrough);
+    }
+
+    #[test]
+    fn stream_probe_waits_for_split_tool_prefix() {
+        let mut probe = StreamProbe::new();
+
+        assert_eq!(probe.ingest("TOO", false), None);
+        assert_eq!(probe.mode, ProbeMode::Pending("TOO".to_owned()));
+        assert_eq!(probe.ingest("L: read|src/main.rs", false), None);
+        assert_eq!(
+            probe.finish(),
+            StreamProbeResult::Tool("TOOL: read|src/main.rs".to_owned())
+        );
+    }
+
+    #[test]
+    fn stream_probe_flushes_when_partial_prefix_turns_normal() {
+        let mut probe = StreamProbe::new();
+
+        assert_eq!(probe.ingest("TOO", false), None);
+        let flushed = probe.ingest("k", false);
+
+        assert_eq!(flushed.as_deref(), Some("TOOk"));
+        assert_eq!(probe.mode, ProbeMode::PassThrough);
+    }
+
+    #[test]
+    fn stream_probe_flushes_incomplete_prefix_at_end() {
+        let mut probe = StreamProbe::new();
+        let flushed = probe.ingest("TOO", true);
+
+        assert_eq!(flushed.as_deref(), Some("TOO"));
+        assert_eq!(probe.finish(), StreamProbeResult::PassThrough);
     }
 }
