@@ -2,6 +2,13 @@
 
 *Generated on 2026-04-05*
 
+## 0.2.1 — 2026-04-05
+
+### Changes
+
+- add shorthands for common cli flags
+
+
 ## 0.2.0 — 2026-04-05
 
 ### Changes
