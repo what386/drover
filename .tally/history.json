@@ -73,5 +73,18 @@
       "patch": 0,
       "is_prerelease": false
     }
+  },
+  {
+    "change": {
+      "description": "feat: No-tools mode",
+      "priority": "Medium",
+      "tags": [
+        "security",
+        "feature"
+      ],
+      "commit": null,
+      "completed_at": "2026-04-05T18:40:07.812258979Z"
+    },
+    "version": null
   }
 ]
