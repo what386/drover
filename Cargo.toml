@@ -17,6 +17,8 @@ exclude = [
 
 [dependencies]
 anyhow = "1.0.102"
+globset = "0.4.18"
 json = "0.12.4"
+time = { version = "0.3.44", features = ["formatting"] }
 toml = "1.1.2"
 ureq = "2.12.1"
