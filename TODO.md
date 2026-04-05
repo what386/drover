@@ -8,9 +8,6 @@
 - [ ] implement history/session management #feature
       @created 2026-04-05 14:23
 
-- [ ] fix status writeback to stdout
-      @created 2026-04-05 19:23
-
 - [ ] rename --no-stream to --raw for scripting
       @created 2026-04-05 19:23
 
@@ -34,4 +31,8 @@
       @created 2026-04-05 19:09
       @completed 2026-04-05 19:09
       @completed_version 0.3.2
+
+- [x] fix status writeback to stdout
+      @created 2026-04-05 19:23
+      @completed 2026-04-05 20:02
 
