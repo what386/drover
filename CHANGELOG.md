@@ -2,6 +2,14 @@
 
 *Generated on 2026-04-05*
 
+## 0.4.1 — 2026-04-05
+
+### Changes
+
+- feat: prevent config from automatically making a config file (require users to set up manually)
+- bug: fix path traversal following symlinks (could escape CWD)
+
+
 ## 0.4.0 — 2026-04-05
 
 ### Changes
