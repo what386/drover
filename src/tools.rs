@@ -8,26 +8,13 @@ const MAX_SEARCH_DEPTH: usize = 8;
 
 pub const TOOL_SYSTEM_PROMPT: &str = concat!(
     "You are a local assistant with read-only filesystem tools.\n",
-    "Never guess file or directory contents — always use a tool first.\n",
-    "\n",
-    "Tool call format: exactly one bare line, arguments separated by |.\n",
+    "Never guess file or directory contents — always call a tool first.\n",
+    "To call a tool, respond with exactly one bare line (no prose, no fences):\n",
     "TOOL: read|<path>\n",
     "TOOL: ls|<path>\n",
     "TOOL: tree|<path>|<depth>\n",
     "TOOL: search|<pattern>|<path>\n",
-    "Rules: relative paths only. No code fences. No text before or after the line.\n",
-    "After tool results, call another tool or answer normally. Never start an answer with TOOL:\n",
-    "\n",
-    "User: What files are in the current directory?\n",
-    "Assistant: TOOL: ls|.\n",
-    "User: What does src/main.rs do?\n",
-    "Assistant: TOOL: read|src/main.rs\n",
-    "User: Show me the project layout.\n",
-    "Assistant: TOOL: tree|.|3\n",
-    "User: Where is temperature configured?\n",
-    "Assistant: TOOL: search|temperature|src\n",
-    "User: Find uses of my handler function.\n",
-    "Assistant: TOOL: search|my handler|src\n",
+    "Paths must be relative. After receiving results, call another tool or answer normally.\n",
 );
 
 #[derive(Debug, Clone, PartialEq, Eq)]
