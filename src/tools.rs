@@ -14,8 +14,8 @@ pub const TOOL_SYSTEM_PROMPT: &str = concat!(
     "You are a local assistant with read-only filesystem tools.\n",
     "Never guess file or directory contents — always call a tool first.\n",
     "To call a tool, respond with exactly one bare line (no prose, no fences):\n",
-    "TOOL: read|<path>          # output the contents of a file\n",
-    "TOOL: ls|<path>            # list immediate children of a directory\n",
+    "TOOL: read|<path>          # output the contents of one file\n",
+    "TOOL: ls|<path>            # list immediate children of one directory\n",
     "TOOL: stat|<path>          # metadata: size, type, permissions, etc\n",
     "TOOL: tree|<path>|<depth>  # recursive directory listing up to <depth> levels\n",
     "TOOL: glob|<pattern>       # find paths matching a glob (e.g. **/*.rs)\n",
@@ -56,11 +56,14 @@ pub fn parse_tool_call(output: &str) -> Result<Option<ToolCall>> {
     }
 
     let body = trimmed["TOOL:".len()..].trim();
-    let parts: Vec<&str> = body.splitn(4, '|').collect();
+    let mut parts: Vec<&str> = body.split('|').map(str::trim).collect();
+    while matches!(parts.last(), Some(part) if part.is_empty()) {
+        parts.pop();
+    }
 
     let command = parts
         .first()
-        .map(|s| s.trim())
+        .copied()
         .filter(|s| !s.is_empty())
         .ok_or_else(|| anyhow!("missing tool name after `TOOL:`"))?;
 
@@ -68,10 +71,10 @@ pub fn parse_tool_call(output: &str) -> Result<Option<ToolCall>> {
         "read" => {
             let path = parts
                 .get(1)
-                .map(|s| s.trim())
+                .copied()
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow!("missing path for `read` tool"))?;
-            if parts.get(2).is_some() {
+            if parts.len() > 2 {
                 bail!("too many arguments for `read` tool");
             }
             ToolCall::Read {
@@ -81,10 +84,10 @@ pub fn parse_tool_call(output: &str) -> Result<Option<ToolCall>> {
         "ls" => {
             let path = parts
                 .get(1)
-                .map(|s| s.trim())
+                .copied()
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow!("missing path for `ls` tool"))?;
-            if parts.get(2).is_some() {
+            if parts.len() > 2 {
                 bail!("too many arguments for `ls` tool");
             }
             ToolCall::Ls {
@@ -94,10 +97,10 @@ pub fn parse_tool_call(output: &str) -> Result<Option<ToolCall>> {
         "stat" => {
             let path = parts
                 .get(1)
-                .map(|s| s.trim())
+                .copied()
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow!("missing path for `stat` tool"))?;
-            if parts.get(2).is_some() {
+            if parts.len() > 2 {
                 bail!("too many arguments for `stat` tool");
             }
             ToolCall::Stat {
@@ -107,18 +110,18 @@ pub fn parse_tool_call(output: &str) -> Result<Option<ToolCall>> {
         "tree" => {
             let path = parts
                 .get(1)
-                .map(|s| s.trim())
+                .copied()
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow!("missing path for `tree` tool"))?;
             let depth = parts
                 .get(2)
-                .map(|s| s.trim())
+                .copied()
                 .filter(|s| !s.is_empty())
                 .unwrap_or("3")
                 .parse::<usize>()
                 .map_err(|_| anyhow!("depth must be a positive integer"))?;
             let depth = depth.min(MAX_SEARCH_DEPTH);
-            if parts.get(3).is_some() {
+            if parts.len() > 3 {
                 bail!("too many arguments for `tree` tool");
             }
             ToolCall::Tree {
@@ -129,10 +132,10 @@ pub fn parse_tool_call(output: &str) -> Result<Option<ToolCall>> {
         "glob" => {
             let pattern = parts
                 .get(1)
-                .map(|s| s.trim())
+                .copied()
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow!("missing pattern for `glob` tool"))?;
-            if parts.get(2).is_some() {
+            if parts.len() > 2 {
                 bail!("too many arguments for `glob` tool");
             }
             ToolCall::Glob {
@@ -142,15 +145,15 @@ pub fn parse_tool_call(output: &str) -> Result<Option<ToolCall>> {
         "search" => {
             let pattern = parts
                 .get(1)
-                .map(|s| s.trim())
+                .copied()
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow!("missing pattern for `search` tool"))?;
             let path = parts
                 .get(2)
-                .map(|s| s.trim())
+                .copied()
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow!("missing path for `search` tool"))?;
-            if parts.get(3).is_some() {
+            if parts.len() > 3 {
                 bail!("too many arguments for `search` tool");
             }
             ToolCall::Search {
@@ -159,7 +162,7 @@ pub fn parse_tool_call(output: &str) -> Result<Option<ToolCall>> {
             }
         }
         "env" => {
-            if parts.get(1).is_some() {
+            if parts.len() > 1 {
                 bail!("too many arguments for `env` tool");
             }
             ToolCall::Env
@@ -590,6 +593,17 @@ mod tests {
     }
 
     #[test]
+    fn parses_ls_with_trailing_empty_segment() {
+        let call = parse_tool_call("TOOL: ls|.|").unwrap().unwrap();
+        assert_eq!(
+            call,
+            ToolCall::Ls {
+                path: ".".to_owned()
+            }
+        );
+    }
+
+    #[test]
     fn parses_stat_tool_call() {
         let call = parse_tool_call("TOOL: stat|src/main.rs").unwrap().unwrap();
         assert_eq!(
@@ -668,6 +682,12 @@ mod tests {
     }
 
     #[test]
+    fn parses_env_with_trailing_empty_segment() {
+        let call = parse_tool_call("TOOL: env|").unwrap().unwrap();
+        assert_eq!(call, ToolCall::Env);
+    }
+
+    #[test]
     fn parses_path_with_spaces() {
         let call = parse_tool_call("TOOL: read|my dir/my file.rs")
             .unwrap()
@@ -676,6 +696,17 @@ mod tests {
             call,
             ToolCall::Read {
                 path: "my dir/my file.rs".to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn parses_read_with_whitespace_only_trailing_segment() {
+        let call = parse_tool_call("TOOL: read|note.txt|   ").unwrap().unwrap();
+        assert_eq!(
+            call,
+            ToolCall::Read {
+                path: "note.txt".to_owned()
             }
         );
     }
@@ -722,6 +753,18 @@ mod tests {
             ToolCall::Tree {
                 path: ".".to_owned(),
                 depth: 8
+            }
+        );
+    }
+
+    #[test]
+    fn parses_tree_with_whitespace_only_trailing_segment() {
+        let call = parse_tool_call("TOOL: tree|src|2| ").unwrap().unwrap();
+        assert_eq!(
+            call,
+            ToolCall::Tree {
+                path: "src".to_owned(),
+                depth: 2
             }
         );
     }
