@@ -73,7 +73,7 @@ CLI flags override config values for the current invocation.
 - `--no-tools` disables tool prompting and ignores unprompted `TOOL:` output as plain model text
 - `--system` is a per-command override
 - `--verbose` prints request and timing details to `stderr`
-- `--no-stream` waits for the full response before printing
+- `--no-stream` waits for the full response before printing and suppresses transient tool status updates
 
 ## Requirements
 
