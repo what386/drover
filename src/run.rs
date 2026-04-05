@@ -30,17 +30,16 @@ impl Cli {
     }
 
     fn resolve_prompt(&self, stdin_is_terminal: bool) -> Result<String> {
-        if let Some(prompt) = self.prompt.clone() {
-            return Ok(prompt);
-        }
+        let stdin = if stdin_is_terminal {
+            None
+        } else {
+            Some(Self::read_stdin()?)
+        };
 
-        if stdin_is_terminal {
-            bail!(
-                "expected a prompt argument or piped stdin input\n\n{}",
-                Self::help_text()
-            );
-        }
+        Self::compose_prompt(self.prompt.clone(), stdin)
+    }
 
+    fn read_stdin() -> Result<String> {
         let mut stdin = String::new();
         io::stdin()
             .read_to_string(&mut stdin)
@@ -51,6 +50,18 @@ impl Cli {
         }
 
         Ok(stdin)
+    }
+
+    fn compose_prompt(prompt: Option<String>, stdin: Option<String>) -> Result<String> {
+        match (prompt, stdin) {
+            (Some(prompt), Some(stdin)) => Ok(format!("{prompt}\n\nInput:\n{stdin}")),
+            (Some(prompt), None) => Ok(prompt),
+            (None, Some(stdin)) => Ok(stdin),
+            (None, None) => bail!(
+                "expected a prompt argument or piped stdin input\n\n{}",
+                Self::help_text()
+            ),
+        }
     }
 
     fn build_request(&self, config: &Config, prompt: String) -> Result<GenerateRequest> {
@@ -177,22 +188,12 @@ mod tests {
             prompt: Some("prompt".to_owned()),
         };
 
-        assert_eq!(cli.resolve_prompt(true).unwrap(), "prompt");
+        assert_eq!(Cli::compose_prompt(cli.prompt.clone(), None).unwrap(), "prompt");
     }
 
     #[test]
     fn resolve_prompt_requires_input_when_stdin_is_terminal() {
-        let cli = Cli {
-            host: None,
-            model: None,
-            system: None,
-            temp: None,
-            stream: true,
-            verbose: false,
-            prompt: None,
-        };
-
-        let err = cli.resolve_prompt(true).unwrap_err();
+        let err = Cli::compose_prompt(None, None).unwrap_err();
         assert_eq!(
             err.to_string(),
             format!(
@@ -200,6 +201,24 @@ mod tests {
                 Cli::help_text()
             )
         );
+    }
+
+    #[test]
+    fn compose_prompt_uses_stdin_only_when_no_prompt_is_provided() {
+        let prompt = Cli::compose_prompt(None, Some("file contents".to_owned())).unwrap();
+
+        assert_eq!(prompt, "file contents");
+    }
+
+    #[test]
+    fn compose_prompt_combines_prompt_and_stdin() {
+        let prompt = Cli::compose_prompt(
+            Some("what is this project about?".to_owned()),
+            Some("README body".to_owned()),
+        )
+        .unwrap();
+
+        assert_eq!(prompt, "what is this project about?\n\nInput:\nREADME body");
     }
 
     #[test]

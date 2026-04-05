@@ -5,6 +5,7 @@
 It supports:
 - prompt input as a positional argument
 - prompt input from `stdin`
+- combined prompt plus `stdin` context
 - model, system prompt, and temperature overrides
 - host override for one-off Ollama targets
 - streaming or non-streaming output
@@ -27,6 +28,7 @@ cargo run -- "Write a haiku about Rust"
 ```bash
 drover "prompt"
 cat file.txt | drover
+cat file.txt | drover "what is this about?"
 
 drover --model llama3 "prompt"
 drover --host http://localhost:11434 "prompt"
@@ -63,6 +65,7 @@ CLI flags override config values for the current invocation.
 
 - `model` should match the exact Ollama model name you see in `ollama list`
 - `--host` overrides the configured Ollama server for a single run
+- if both stdin and a prompt are provided, the prompt is treated as the instruction and stdin is appended as `Input:` context
 - `--system` is a per-command override
 - `--verbose` prints request and timing details to `stderr`
 - `--no-stream` waits for the full response before printing

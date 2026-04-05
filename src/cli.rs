@@ -28,6 +28,7 @@ impl Cli {
             "Usage:\n",
             "  drover \"prompt\"\n",
             "  cat file.txt | drover\n",
+            "  cat file.txt | drover \"what is this about?\"\n",
             "\n",
             "Options:\n",
             "  --help             Show this help text and exit\n",
