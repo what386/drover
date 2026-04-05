@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, anyhow, bail};
 use globset::{GlobBuilder, GlobMatcher};
 use std::fs;
+use std::fs::FileType;
 use std::path::{Path, PathBuf};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -253,17 +254,14 @@ fn list_path(base_dir: &Path, path: &str) -> Result<String> {
         ));
     }
 
-    let mut entries = fs::read_dir(&resolved)
-        .context(format!("failed to list directory: {}", resolved.display()))?
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .context(format!("failed to list directory: {}", resolved.display()))?;
-    entries.sort_by_key(|e| e.file_name());
-
     let mut lines = vec![format!("LS {}", display_relative(base_dir, &resolved))];
-    for entry in entries {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let kind = if entry.path().is_dir() { "DIR" } else { "FILE" };
-        lines.push(format!("{kind} {name}"));
+    for entry in read_dir_entries(&resolved)? {
+        let kind = if entry.displays_as_dir() {
+            "DIR"
+        } else {
+            "FILE"
+        };
+        lines.push(format!("{kind} {}", entry.name));
     }
 
     Ok(truncate_output(lines.join("\n"), path))
@@ -311,21 +309,15 @@ fn collect_tree(
         return Ok(());
     }
 
-    let mut entries = fs::read_dir(path)
-        .context(format!("failed to list directory: {}", path.display()))?
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .context(format!("failed to list directory: {}", path.display()))?;
-    entries.sort_by_key(|e| e.file_name());
-
     let indent = "  ".repeat(depth + 1);
-    for entry in entries {
-        let entry_path = entry.path();
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if entry_path.is_dir() {
-            lines.push(format!("{indent}{name}/"));
-            collect_tree(&entry_path, depth + 1, max_depth, lines)?;
+    for entry in read_dir_entries(path)? {
+        if entry.displays_as_dir() {
+            lines.push(format!("{indent}{}/", entry.name));
+            if entry.should_recurse() {
+                collect_tree(&entry.path, depth + 1, max_depth, lines)?;
+            }
         } else {
-            lines.push(format!("{indent}{name}"));
+            lines.push(format!("{indent}{}", entry.name));
         }
     }
 
@@ -368,20 +360,11 @@ fn collect_glob_results(
         return Ok(());
     }
 
-    let mut entries = fs::read_dir(path)
-        .context(format!("failed to list directory: {}", path.display()))?
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .context(format!("failed to list directory: {}", path.display()))?;
-    entries.sort_by_key(|e| e.file_name());
-
-    for entry in entries {
-        let entry_path = entry.path();
-        let metadata = fs::metadata(&entry_path)
-            .context(format!("failed to inspect path: {}", entry_path.display()))?;
-        let relative = display_relative(base_dir, &entry_path).replace('\\', "/");
+    for entry in read_dir_entries(path)? {
+        let relative = display_relative(base_dir, &entry.path).replace('\\', "/");
 
         if matcher.is_match(&relative) {
-            if metadata.is_dir() {
+            if entry.displays_as_dir() {
                 matches.push(format!("{relative}/"));
             } else {
                 matches.push(relative.clone());
@@ -391,8 +374,8 @@ fn collect_glob_results(
             }
         }
 
-        if metadata.is_dir() {
-            collect_glob_results(base_dir, &entry_path, matcher, matches)?;
+        if entry.should_recurse() {
+            collect_glob_results(base_dir, &entry.path, matcher, matches)?;
             if matches.len() >= MAX_GLOB_MATCHES {
                 return Ok(());
             }
@@ -439,13 +422,11 @@ fn collect_search_results(
         fs::metadata(path).context(format!("failed to inspect path: {}", path.display()))?;
 
     if metadata.is_dir() {
-        let mut entries = fs::read_dir(path)
-            .context(format!("failed to list directory: {}", path.display()))?
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .context(format!("failed to list directory: {}", path.display()))?;
-        entries.sort_by_key(|e| e.file_name());
-        for entry in entries {
-            collect_search_results(base_dir, &entry.path(), pattern, matches, depth + 1)?;
+        for entry in read_dir_entries(path)? {
+            if entry.file_type.is_symlink() {
+                continue;
+            }
+            collect_search_results(base_dir, &entry.path, pattern, matches, depth + 1)?;
             if matches.len() >= MAX_SEARCH_MATCHES {
                 return Ok(());
             }
@@ -540,6 +521,58 @@ fn is_likely_binary(path: &Path) -> bool {
     )
 }
 
+#[derive(Debug, Clone)]
+struct DirectoryEntry {
+    path: PathBuf,
+    name: String,
+    file_type: FileType,
+    target_is_dir: bool,
+}
+
+impl DirectoryEntry {
+    fn displays_as_dir(&self) -> bool {
+        self.file_type.is_dir() || (self.file_type.is_symlink() && self.target_is_dir)
+    }
+
+    fn should_recurse(&self) -> bool {
+        self.file_type.is_dir()
+    }
+}
+
+fn read_dir_entries(path: &Path) -> Result<Vec<DirectoryEntry>> {
+    let mut entries = fs::read_dir(path)
+        .context(format!("failed to list directory: {}", path.display()))?
+        .map(|entry| build_directory_entry(entry, path))
+        .collect::<Result<Vec<_>>>()?;
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(entries)
+}
+
+fn build_directory_entry(
+    entry: std::io::Result<fs::DirEntry>,
+    parent: &Path,
+) -> Result<DirectoryEntry> {
+    let entry = entry.context(format!("failed to list directory: {}", parent.display()))?;
+    let path = entry.path();
+    let file_type = entry
+        .file_type()
+        .context(format!("failed to inspect path: {}", path.display()))?;
+    let target_is_dir = if file_type.is_symlink() {
+        fs::metadata(&path)
+            .map(|metadata| metadata.is_dir())
+            .unwrap_or(false)
+    } else {
+        file_type.is_dir()
+    };
+
+    Ok(DirectoryEntry {
+        path,
+        name: entry.file_name().to_string_lossy().into_owned(),
+        file_type,
+        target_is_dir,
+    })
+}
+
 fn resolve_path(base_dir: &Path, path: &str) -> Result<PathBuf> {
     let candidate = Path::new(path);
     if candidate.is_absolute() {
@@ -615,6 +648,8 @@ mod tests {
         ExtractedToolCall, ToolCall, execute_tool_call, extract_tool_call, parse_tool_call,
     };
     use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1052,6 +1087,109 @@ mod tests {
         )
         .unwrap();
         assert!(output.contains("main.rs:1:let my var = 1;"));
+        cleanup(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn tree_lists_symlinked_directory_without_descending() {
+        let root = make_test_dir();
+        let outside = make_test_dir();
+        fs::create_dir_all(outside.join("nested")).unwrap();
+        fs::write(outside.join("nested/secret.rs"), "").unwrap();
+        symlink(&outside, root.join("linked")).unwrap();
+
+        let output = execute_tool_call(
+            &root,
+            &ToolCall::Tree {
+                path: ".".to_owned(),
+                depth: 3,
+            },
+        )
+        .unwrap();
+
+        assert!(output.contains("linked/"));
+        assert!(!output.contains("secret.rs"));
+
+        cleanup(&root);
+        cleanup(&outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn glob_matches_symlink_path_without_descending_into_target() {
+        let root = make_test_dir();
+        let outside = make_test_dir();
+        fs::create_dir_all(outside.join("nested")).unwrap();
+        fs::write(outside.join("nested/secret.rs"), "").unwrap();
+        symlink(&outside, root.join("linked-src")).unwrap();
+
+        let symlink_match = execute_tool_call(
+            &root,
+            &ToolCall::Glob {
+                pattern: "**/linked-src".to_owned(),
+            },
+        )
+        .unwrap();
+        assert!(symlink_match.contains("linked-src/"));
+
+        let rs_match = execute_tool_call(
+            &root,
+            &ToolCall::Glob {
+                pattern: "**/*.rs".to_owned(),
+            },
+        )
+        .unwrap();
+        assert!(!rs_match.contains("secret.rs"));
+
+        cleanup(&root);
+        cleanup(&outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn search_does_not_follow_symlinked_directories() {
+        let root = make_test_dir();
+        let outside = make_test_dir();
+        fs::create_dir_all(outside.join("nested")).unwrap();
+        fs::write(outside.join("nested/secret.rs"), "needle\n").unwrap();
+        symlink(&outside, root.join("linked")).unwrap();
+
+        let output = execute_tool_call(
+            &root,
+            &ToolCall::Search {
+                pattern: "needle".to_owned(),
+                path: ".".to_owned(),
+            },
+        )
+        .unwrap();
+
+        assert!(output.contains("NO MATCHES"));
+
+        cleanup(&root);
+        cleanup(&outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn tree_does_not_recurse_into_symlink_loops() {
+        let root = make_test_dir();
+        fs::create_dir(root.join("src")).unwrap();
+        fs::write(root.join("src/main.rs"), "").unwrap();
+        symlink(root.join("src"), root.join("src/loop")).unwrap();
+
+        let output = execute_tool_call(
+            &root,
+            &ToolCall::Tree {
+                path: ".".to_owned(),
+                depth: 6,
+            },
+        )
+        .unwrap();
+
+        assert!(output.contains("loop/"));
+        assert_eq!(output.matches("loop/").count(), 1);
+
         cleanup(&root);
     }
 
