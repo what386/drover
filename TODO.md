@@ -8,6 +8,9 @@
 - [ ] implement history/session management #feature
       @created 2026-04-05 14:23
 
+- [ ] bug: fix path traversal following symlinks (could escape CWD)
+      @created 2026-04-05 22:18
+
 
 ## Completed
 
