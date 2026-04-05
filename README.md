@@ -9,6 +9,7 @@ It supports:
 - model, system prompt, and temperature overrides
 - host override for one-off Ollama targets
 - streaming or non-streaming output
+- read-only filesystem tool invocation during a run
 - a simple TOML config file
 
 ## Build
@@ -66,6 +67,7 @@ CLI flags override config values for the current invocation.
 - `model` should match the exact Ollama model name you see in `ollama list`
 - `--host` overrides the configured Ollama server for a single run
 - if both stdin and a prompt are provided, the prompt is treated as the instruction and stdin is appended as `Input:` context
+- the model can request read-only tools using `TOOL: read <path>`, `TOOL: ls <path>`, and `TOOL: search <pattern> <path>`
 - `--system` is a per-command override
 - `--verbose` prints request and timing details to `stderr`
 - `--no-stream` waits for the full response before printing
