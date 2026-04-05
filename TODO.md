@@ -8,26 +8,3 @@
 - [ ] feat: Tool invocations (filesystem access, primarily)
       @created 2026-04-04 23:27
 
-
-## Completed
-
-- [x] initial release
-      @created 2026-04-04 23:49
-      @completed 2026-04-04 23:49
-      @completed_version 0.1.0
-
-- [x] --host flag for overrriding url
-      @created 2026-04-05 00:32
-      @completed 2026-04-05 00:32
-      @completed_version 0.1.1
-
-- [x] file + prompt feature
-      @created 2026-04-05 01:12
-      @completed 2026-04-05 01:12
-      @completed_version 0.2.0
-
-- [x] add shorthands for common cli flags
-      @created 2026-04-05 03:46
-      @completed 2026-04-05 03:46
-      @completed_version 0.2.1
-
