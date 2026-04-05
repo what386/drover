@@ -14,6 +14,9 @@
 - [ ] rename --no-stream to --raw for scripting
       @created 2026-04-05 19:23
 
+- [ ] fix streamed output for tool-enabled mode
+      @created 2026-04-05 20:02
+
 
 ## Completed
 
