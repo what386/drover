@@ -8,6 +8,9 @@
 - [ ] implement history/session management #feature
       @created 2026-04-05 14:23
 
+- [ ] fix status writeback to stdout
+      @created 2026-04-05 19:23
+
 
 ## Completed
 
