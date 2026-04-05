@@ -20,6 +20,7 @@ impl Config {
     fn load_from_path(path: &Path) -> Result<Self> {
         match fs::read_to_string(path) {
             Ok(contents) => Self::parse(&contents),
+            // if not found, write defaults
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
                 let config = Self::default();
                 config.write_to_path(path)?;
