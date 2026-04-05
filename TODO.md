@@ -24,4 +24,5 @@
 - [x] file + prompt feature
       @created 2026-04-05 01:12
       @completed 2026-04-05 01:12
+      @completed_version 0.2.0
 
