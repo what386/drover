@@ -1,4 +1,4 @@
-# TODO — drover v0.4.0
+# TODO — drover v0.4.1
 
 @created: 2026-04-04
 @modified: 2026-04-05
@@ -44,8 +44,10 @@
 - [x] feat: prevent config from automatically making a config file (require users to set up manually)
       @created 2026-04-05 22:19
       @completed 2026-04-05 22:19
+      @completed_version 0.4.1
 
 - [x] bug: fix path traversal following symlinks (could escape CWD)
       @created 2026-04-05 22:18
       @completed 2026-04-05 22:19
+      @completed_version 0.4.1
 
