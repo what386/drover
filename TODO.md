@@ -29,4 +29,5 @@
 - [x] add shorthands for common cli flags
       @created 2026-04-05 03:46
       @completed 2026-04-05 03:46
+      @completed_version 0.2.1
 
