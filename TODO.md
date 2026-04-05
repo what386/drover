@@ -8,6 +8,9 @@
 - [ ] implement history/session management #feature
       @created 2026-04-05 14:23
 
+- [ ] feat: No-tools mode #security #feature
+      @created 2026-04-05 18:40
+
 
 ## Completed
 
