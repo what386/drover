@@ -16,6 +16,7 @@ pub const TOOL_SYSTEM_PROMPT: &str = concat!(
     "- Arguments are space-separated.\n",
     "- Multiple values within one argument use '|'.\n",
     "- All paths are relative to the current working directory.\n",
+    "- Absolute paths (e.g. /home/$(USER)/Documents) are forbidden.\n",
     "\n",
     "Available tools:\n",
     "  glob <pattern> [exclude]   – find matching paths\n",
