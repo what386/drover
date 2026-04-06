@@ -1,7 +1,7 @@
-# TODO — drover v0.4.1
+# TODO — drover v0.5.0
 
 @created: 2026-04-04
-@modified: 2026-04-05
+@modified: 2026-04-06
 
 ## Tasks
 
