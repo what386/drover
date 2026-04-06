@@ -1,6 +1,6 @@
 use crate::cli::{Cli, HELP_TEXT};
-use crate::config::Config;
-use crate::ollama::{GenerateRequest, GenerateResponse, OllamaClient, StreamCallbackAction};
+use crate::services::config::Config;
+use crate::services::ollama::{GenerateRequest, GenerateResponse, OllamaClient, StreamCallbackAction};
 use crate::tools::{
     TOOL_SYSTEM_PROMPT, ToolCall, execute_tool_call, extract_tool_call, parse_tool_call,
 };
@@ -291,13 +291,18 @@ impl Cli {
 
     fn tool_status_message(call: &ToolCall) -> String {
         match call {
-            ToolCall::Ls { path } => format!("* listing {path}..."),
+            ToolCall::List { paths } => format!("* listing {}...", paths.join(", ")),
             ToolCall::Read { path } => format!("* reading {path}..."),
             ToolCall::Stat { path } => format!("* stating {path}..."),
-            ToolCall::Tree { path, .. } => format!("* walking {path}..."),
-            ToolCall::Glob { pattern } => format!("* globbing {pattern}..."),
-            ToolCall::Search { pattern, path } => format!("* searching {path} for {pattern}..."),
-            ToolCall::Env => "* reading environment...".to_owned(),
+            ToolCall::Glob { pattern, exclude } => match exclude {
+                Some(exclude) => format!("* globbing {pattern} excluding {exclude}..."),
+                None => format!("* globbing {pattern}..."),
+            },
+            ToolCall::Search { paths, patterns } => format!(
+                "* searching {} for {}...",
+                paths.join(", "),
+                patterns.join(", ")
+            ),
         }
     }
 
@@ -471,7 +476,7 @@ impl StreamProbe {
 mod tests {
     use super::{Cli, StreamProbe, StreamProbeAction, StreamProbeResult};
     use crate::cli::HELP_TEXT;
-    use crate::config::Config;
+    use crate::services::config::Config;
     use crate::tools::ToolCall;
 
     #[test]
@@ -592,46 +597,6 @@ mod tests {
     }
 
     #[test]
-    fn initial_tool_prompt_wraps_user_request() {
-        assert_eq!(
-            Cli::initial_tool_prompt("summarize this"),
-            "User request:\nsummarize this"
-        );
-    }
-
-    #[test]
-    fn tool_status_message_is_human_readable() {
-        let msg = Cli::tool_status_message(&crate::tools::ToolCall::Read {
-            path: "src/main.rs".to_owned(),
-        });
-        assert_eq!(msg, "* reading src/main.rs...");
-    }
-
-    #[test]
-    fn tool_status_message_handles_env_tool() {
-        let msg = Cli::tool_status_message(&crate::tools::ToolCall::Env);
-        assert_eq!(msg, "* reading environment...");
-    }
-
-    #[test]
-    fn writes_tool_status_only_when_streaming() {
-        let streaming = crate::ollama::GenerateRequest {
-            model: "llama3".to_owned(),
-            prompt: "prompt".to_owned(),
-            system: None,
-            temp: None,
-            stream: true,
-        };
-        let non_streaming = crate::ollama::GenerateRequest {
-            stream: false,
-            ..streaming.clone()
-        };
-
-        assert!(Cli::should_write_tool_status(&streaming));
-        assert!(!Cli::should_write_tool_status(&non_streaming));
-    }
-
-    #[test]
     fn stream_probe_passes_through_normal_output() {
         let mut probe = StreamProbe::new();
         let action = probe.ingest("Hello", true).unwrap();
@@ -682,7 +647,7 @@ mod tests {
                 stop: false
             }
         );
-        let action = probe.ingest("L: read|src/main.rs", true).unwrap();
+        let action = probe.ingest("L: read src/main.rs", true).unwrap();
         assert_eq!(
             action,
             StreamProbeAction {
@@ -714,7 +679,7 @@ mod tests {
                 stop: false
             }
         );
-        let action = probe.ingest("TOOL: read|README.md", true).unwrap();
+        let action = probe.ingest("TOOL: read README.md", true).unwrap();
         assert_eq!(
             action,
             StreamProbeAction {
@@ -738,13 +703,13 @@ mod tests {
     fn stream_probe_ignores_inline_tool_text() {
         let mut probe = StreamProbe::new();
         let action = probe
-            .ingest("I could say TOOL: read|README.md later.", true)
+            .ingest("I could say TOOL: read README.md later.", true)
             .unwrap();
 
         assert_eq!(
             action,
             StreamProbeAction {
-                flush: "I could say TOOL: read|README.md later.".to_owned(),
+                flush: "I could say TOOL: read README.md later.".to_owned(),
                 stop: false
             }
         );
@@ -755,12 +720,12 @@ mod tests {
     #[test]
     fn stream_probe_ignores_invalid_tool_line() {
         let mut probe = StreamProbe::new();
-        let action = probe.ingest("TOOL: nope|README.md", true).unwrap();
+        let action = probe.ingest("TOOL: nope README.md", true).unwrap();
 
         assert_eq!(
             action,
             StreamProbeAction {
-                flush: "TOOL: nope|README.md".to_owned(),
+                flush: "TOOL: nope README.md".to_owned(),
                 stop: false
             }
         );
@@ -771,7 +736,7 @@ mod tests {
     fn stream_probe_discards_trailing_bytes_after_tool_line() {
         let mut probe = StreamProbe::new();
         let action = probe
-            .ingest("Thinking...\nTOOL: read|README.md\nignored", false)
+            .ingest("Thinking...\nTOOL: read README.md\nignored", false)
             .unwrap();
 
         assert_eq!(

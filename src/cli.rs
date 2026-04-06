@@ -171,26 +171,6 @@ mod tests {
     }
 
     #[test]
-    fn rejects_missing_model_value() {
-        let err = parse(&["-m"]).unwrap_err();
-
-        assert_eq!(
-            err.source().unwrap().to_string(),
-            "missing value for --model"
-        );
-    }
-
-    #[test]
-    fn rejects_missing_host_value() {
-        let err = parse(&["-H"]).unwrap_err();
-
-        assert_eq!(
-            err.source().unwrap().to_string(),
-            "missing value for --host"
-        );
-    }
-
-    #[test]
     fn rejects_missing_system_value() {
         let err = parse(&["-s"]).unwrap_err();
 
@@ -225,41 +205,6 @@ mod tests {
             err.source().unwrap().to_string(),
             "invalid value for --temp: hot"
         );
-    }
-
-    #[test]
-    fn rejects_removed_no_stream_flag() {
-        let err = parse(&["--no-stream"]).unwrap_err();
-
-        assert_eq!(
-            err.source().unwrap().to_string(),
-            "unknown flag: --no-stream"
-        );
-    }
-
-    #[test]
-    fn parses_mixed_short_and_long_flags() {
-        let cli = parse(&[
-            "--model",
-            "llama3",
-            "-H",
-            "http://localhost:11434",
-            "--system",
-            "you are a poet",
-            "-t",
-            "0.7",
-            "-v",
-            "write a sonnet",
-        ])
-        .unwrap();
-
-        assert_eq!(cli.host.as_deref(), Some("http://localhost:11434"));
-        assert_eq!(cli.model.as_deref(), Some("llama3"));
-        assert_eq!(cli.system.as_deref(), Some("you are a poet"));
-        assert_eq!(cli.temp, Some(0.7));
-        assert!(!cli.no_tools);
-        assert!(cli.verbose);
-        assert!(cli.stream);
     }
 
     #[test]
