@@ -1,11 +1,11 @@
 use crate::tools::ToolCall;
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use globset::{GlobBuilder, GlobMatcher};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 use walkdir::WalkDir;
 
 const MAX_TOOL_OUTPUT_BYTES: usize = 16 * 1024;
@@ -28,7 +28,11 @@ fn read_file(base_dir: &Path, path: &str) -> Result<String> {
     let content = fs::read_to_string(&resolved)
         .context(format!("failed to read file: {}", resolved.display()))?;
     Ok(truncate_output(
-        format!("READ {}\n{}", display_relative(base_dir, &resolved), content),
+        format!(
+            "READ {}\n{}",
+            display_relative(base_dir, &resolved),
+            content
+        ),
         path,
     ))
 }
@@ -45,24 +49,35 @@ fn list_paths(base_dir: &Path, paths: &[String]) -> Result<String> {
 fn list_path(base_dir: &Path, path: &str) -> Result<String> {
     let (resolved, metadata) = resolve_with_metadata(base_dir, path)?;
     if metadata.is_file() {
-        return Ok(format!("LS {}\nFILE", display_relative(base_dir, &resolved)));
+        return Ok(format!(
+            "LS {}\nFILE",
+            display_relative(base_dir, &resolved)
+        ));
     }
 
     let mut lines = vec![format!("LS {}", display_relative(base_dir, &resolved))];
     let mut rows = fs::read_dir(&resolved)
         .context(format!("failed to list directory: {}", resolved.display()))?
         .map(|entry| {
-            let entry = entry.context(format!("failed to list directory: {}", resolved.display()))?;
+            let entry =
+                entry.context(format!("failed to list directory: {}", resolved.display()))?;
             let path = entry.path();
             let ty = entry
                 .file_type()
                 .context(format!("failed to inspect path: {}", path.display()))?;
-            let kind = if path_displays_as_dir(&path, ty) { "DIR" } else { "FILE" };
+            let kind = if path_displays_as_dir(&path, ty) {
+                "DIR"
+            } else {
+                "FILE"
+            };
             Ok((entry.file_name().to_string_lossy().into_owned(), kind))
         })
         .collect::<Result<Vec<_>>>()?;
     rows.sort_by(|a, b| a.0.cmp(&b.0));
-    lines.extend(rows.into_iter().map(|(name, kind)| format!("{kind} {name}")));
+    lines.extend(
+        rows.into_iter()
+            .map(|(name, kind)| format!("{kind} {name}")),
+    );
 
     Ok(truncate_output(lines.join("\n"), path))
 }
@@ -205,7 +220,12 @@ fn push_search_matches(
 
     for (i, line) in content.lines().enumerate() {
         if patterns.iter().any(|p| line.contains(p)) {
-            matches.push(format!("{}:{}:{}", display_relative(base_dir, path), i + 1, line));
+            matches.push(format!(
+                "{}:{}:{}",
+                display_relative(base_dir, path),
+                i + 1,
+                line
+            ));
             if matches.len() >= MAX_SEARCH_MATCHES {
                 break;
             }
@@ -272,8 +292,10 @@ fn resolve_path(base_dir: &Path, path: &str) -> Result<PathBuf> {
         bail!("absolute paths are not allowed");
     }
 
-    let base_dir = fs::canonicalize(base_dir)
-        .context(format!("failed to resolve base directory: {}", base_dir.display()))?;
+    let base_dir = fs::canonicalize(base_dir).context(format!(
+        "failed to resolve base directory: {}",
+        base_dir.display()
+    ))?;
     let joined = base_dir.join(candidate);
     let resolved =
         fs::canonicalize(&joined).context(format!("path does not exist: {}", joined.display()))?;

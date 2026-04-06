@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -131,7 +131,10 @@ host = "http://localhost:11434"
     #[test]
     fn rejects_non_boolean_allow_tools() {
         let err = Config::parse(r#"allow_tools = "yes""#).unwrap_err();
-        assert_eq!(err.to_string(), "config key `allow_tools` must be a boolean");
+        assert_eq!(
+            err.to_string(),
+            "config key `allow_tools` must be a boolean"
+        );
     }
 
     #[test]

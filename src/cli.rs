@@ -221,7 +221,10 @@ mod tests {
     fn rejects_missing_tools_value() {
         let err = parse(&["--tools"]).unwrap_err();
 
-        assert_eq!(err.source().unwrap().to_string(), "missing value for --tools");
+        assert_eq!(
+            err.source().unwrap().to_string(),
+            "missing value for --tools"
+        );
     }
 
     #[test]

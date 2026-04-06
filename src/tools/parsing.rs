@@ -170,8 +170,6 @@ pub fn extract_tool_call(output: &str) -> Result<Option<ExtractedToolCall>> {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::{extract_tool_call, parse_tool_call};
@@ -179,7 +177,9 @@ mod tests {
 
     #[test]
     fn parses_glob_tool_call_with_exclude() {
-        let call = parse_tool_call("TOOL: glob **/*.rs target/**/*").unwrap().unwrap();
+        let call = parse_tool_call("TOOL: glob **/*.rs target/**/*")
+            .unwrap()
+            .unwrap();
         assert_eq!(
             call,
             ToolCall::Glob {
@@ -205,7 +205,9 @@ mod tests {
 
     #[test]
     fn parses_multi_path_list_call() {
-        let call = parse_tool_call("TOOL: list \"src|tests/my dir\"").unwrap().unwrap();
+        let call = parse_tool_call("TOOL: list \"src|tests/my dir\"")
+            .unwrap()
+            .unwrap();
         assert_eq!(
             call,
             ToolCall::List {
@@ -296,7 +298,9 @@ mod tests {
             extracted,
             ExtractedToolCall {
                 preamble: "TOOL: nope README.md\nThinking...\n".to_owned(),
-                call: ToolCall::List { paths: vec!["src".to_owned()] }
+                call: ToolCall::List {
+                    paths: vec!["src".to_owned()]
+                }
             }
         );
     }
@@ -315,7 +319,10 @@ mod tests {
     #[test]
     fn rejects_legacy_pipe_syntax() {
         let err = parse_tool_call("TOOL: read|note.txt").unwrap_err();
-        assert_eq!(err.to_string(), "legacy `|`-delimited tool syntax is not supported");
+        assert_eq!(
+            err.to_string(),
+            "legacy `|`-delimited tool syntax is not supported"
+        );
     }
 
     #[test]

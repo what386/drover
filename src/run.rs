@@ -1,6 +1,8 @@
 use crate::cli::{Cli, HELP_TEXT};
 use crate::services::config::Config;
-use crate::services::ollama::{GenerateRequest, GenerateResponse, OllamaClient, StreamCallbackAction};
+use crate::services::ollama::{
+    GenerateRequest, GenerateResponse, OllamaClient, StreamCallbackAction,
+};
 use crate::tools::{
     TOOL_SYSTEM_PROMPT, ToolCall, execute_tool_call, extract_tool_call, parse_tool_call,
 };
@@ -86,10 +88,7 @@ impl Cli {
     }
 
     fn build_request(&self, config: &Config, prompt: String) -> Result<GenerateRequest> {
-        let model = self
-            .model
-            .clone()
-            .unwrap_or_else(|| config.model.clone());
+        let model = self.model.clone().unwrap_or_else(|| config.model.clone());
 
         let temp = self.temp.or(Some(config.temp));
 

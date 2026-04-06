@@ -39,10 +39,19 @@ pub const TOOL_SYSTEM_PROMPT: &str = concat!(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToolCall {
-    Read { path: String },
-    List { paths: Vec<String> },
-    Stat { path: String },
-    Glob { pattern: String, exclude: Option<String> },
+    Read {
+        path: String,
+    },
+    List {
+        paths: Vec<String>,
+    },
+    Stat {
+        path: String,
+    },
+    Glob {
+        pattern: String,
+        exclude: Option<String>,
+    },
     Search {
         paths: Vec<String>,
         patterns: Vec<String>,
@@ -53,7 +62,9 @@ impl ToolCall {
     pub fn display(&self) -> String {
         match self {
             Self::Read { path } => format!("TOOL: read {}", quote_tool_arg(path)),
-            Self::List { paths } => format!("TOOL: list {}", quote_tool_arg(&join_tool_values(paths))),
+            Self::List { paths } => {
+                format!("TOOL: list {}", quote_tool_arg(&join_tool_values(paths)))
+            }
             Self::Stat { path } => format!("TOOL: stat {}", quote_tool_arg(path)),
             Self::Glob { pattern, exclude } => match exclude {
                 Some(exclude) => {
