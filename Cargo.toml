@@ -22,3 +22,4 @@ json = "0.12.4"
 time = { version = "0.3.44", features = ["formatting"] }
 toml = "1.1.2"
 ureq = "2.12.1"
+walkdir = "2.5.0"
