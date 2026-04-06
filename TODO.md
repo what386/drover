@@ -8,6 +8,15 @@
 - [ ] implement history/session management #feature
       @created 2026-04-05 14:23
 
+- [ ] feat: redesign filesystem tool calls with multi-path list/search support #feature
+      @created 2026-04-06 22:18
+
+- [ ] feat: add configurable tool access via allow_tools and --tools true/false #feature #security
+      @created 2026-04-06 22:18
+
+- [ ] feat: redesign filesystem tool calls with multi-path list/search support #feature
+      @created 2026-04-06 22:18
+
 
 ## Completed
 
