@@ -329,11 +329,10 @@ fn display_relative_path(base_dir: &Path, path: &Path) -> PathBuf {
             return relative.to_path_buf();
         }
 
-        if let Ok(canonical_path) = fs::canonicalize(path) {
-            if let Ok(relative) = canonical_path.strip_prefix(&canonical_base_dir) {
+        if let Ok(canonical_path) = fs::canonicalize(path)
+            && let Ok(relative) = canonical_path.strip_prefix(&canonical_base_dir) {
                 return relative.to_path_buf();
             }
-        }
     }
 
     path.to_path_buf()
