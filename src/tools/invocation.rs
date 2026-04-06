@@ -1,11 +1,11 @@
 use crate::tools::ToolCall;
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use globset::{GlobBuilder, GlobMatcher};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 use walkdir::WalkDir;
 
 const MAX_TOOL_OUTPUT_BYTES: usize = 16 * 1024;
@@ -28,72 +28,72 @@ fn read_file(base_dir: &Path, path: &str) -> Result<String> {
     let content = fs::read_to_string(&resolved)
         .context(format!("failed to read file: {}", resolved.display()))?;
     Ok(truncate_output(
-        format!(
-            "READ {}\n{}",
-            display_relative(base_dir, &resolved),
-            content
-        ),
+        format!("READ {}\n{}", display_relative(base_dir, &resolved), content),
         path,
     ))
 }
 
 fn list_paths(base_dir: &Path, paths: &[String]) -> Result<String> {
-    let blocks = paths
+    let out = paths
         .iter()
         .map(|path| list_path(base_dir, path))
-        .collect::<Result<Vec<_>>>()?;
-    let context = join_values(paths);
-    Ok(truncate_output(blocks.join("\n\n"), &context))
+        .collect::<Result<Vec<_>>>()?
+        .join("\n\n");
+    Ok(truncate_output(out, &paths.join("|")))
 }
 
 fn list_path(base_dir: &Path, path: &str) -> Result<String> {
-    let resolved = resolve_path(base_dir, path)?;
-    let metadata = fs::metadata(&resolved)
-        .context(format!("failed to inspect path: {}", resolved.display()))?;
-
+    let (resolved, metadata) = resolve_with_metadata(base_dir, path)?;
     if metadata.is_file() {
-        return Ok(format!(
-            "LS {}\nFILE",
-            display_relative(base_dir, &resolved)
-        ));
+        return Ok(format!("LS {}\nFILE", display_relative(base_dir, &resolved)));
     }
 
     let mut lines = vec![format!("LS {}", display_relative(base_dir, &resolved))];
-    for (name, kind) in read_dir_rows(&resolved)? {
-        lines.push(format!("{kind} {name}"));
-    }
+    let mut rows = fs::read_dir(&resolved)
+        .context(format!("failed to list directory: {}", resolved.display()))?
+        .map(|entry| {
+            let entry = entry.context(format!("failed to list directory: {}", resolved.display()))?;
+            let path = entry.path();
+            let ty = entry
+                .file_type()
+                .context(format!("failed to inspect path: {}", path.display()))?;
+            let kind = if path_displays_as_dir(&path, ty) { "DIR" } else { "FILE" };
+            Ok((entry.file_name().to_string_lossy().into_owned(), kind))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    lines.extend(rows.into_iter().map(|(name, kind)| format!("{kind} {name}")));
 
     Ok(truncate_output(lines.join("\n"), path))
 }
 
 fn stat_path(base_dir: &Path, path: &str) -> Result<String> {
-    let resolved = resolve_path(base_dir, path)?;
-    let metadata = fs::metadata(&resolved)
-        .context(format!("failed to inspect path: {}", resolved.display()))?;
+    let (resolved, metadata) = resolve_with_metadata(base_dir, path)?;
     let relative = display_relative(base_dir, &resolved);
-    let path_type = if metadata.is_dir() { "DIR" } else { "FILE" };
     let modified = metadata
         .modified()
         .ok()
         .and_then(format_system_time)
         .unwrap_or_else(|| "unknown".to_owned());
 
-    let lines = [
-        format!("STAT {relative}"),
-        format!("path: {relative}"),
-        format!("type: {path_type}"),
-        format!("size_bytes: {}", metadata.len()),
-        format!("modified_utc: {modified}"),
-        format!("permissions: {}", format_permissions(&metadata)),
-    ];
-
-    Ok(truncate_output(lines.join("\n"), path))
+    Ok(truncate_output(
+        [
+            format!("STAT {relative}"),
+            format!("path: {relative}"),
+            format!("type: {}", if metadata.is_dir() { "DIR" } else { "FILE" }),
+            format!("size_bytes: {}", metadata.len()),
+            format!("modified_utc: {modified}"),
+            format!("permissions: {}", format_permissions(&metadata)),
+        ]
+        .join("\n"),
+        path,
+    ))
 }
 
-fn glob_paths(base_dir: &Path, pattern: &str, exclude: Option<&str>) -> Result<String> {
+fn glob_paths(base_dir: &Path, pattern: &str, exclude_pattern: Option<&str>) -> Result<String> {
     let matcher = compile_glob_matcher(pattern, "pattern")?;
-    let exclude_matcher = exclude
-        .map(|exclude| compile_glob_matcher(exclude, "exclude pattern"))
+    let exclude = exclude_pattern
+        .map(|p| compile_glob_matcher(p, "exclude pattern"))
         .transpose()?;
 
     let mut matches = Vec::new();
@@ -105,12 +105,9 @@ fn glob_paths(base_dir: &Path, pattern: &str, exclude: Option<&str>) -> Result<S
 
     while let Some(entry) = walker.next() {
         let entry = entry.context(format!("failed to walk directory: {}", base_dir.display()))?;
-        let relative = normalized_relative(base_dir, entry.path());
+        let relative = display_relative(base_dir, entry.path()).replace('\\', "/");
 
-        if exclude_matcher
-            .as_ref()
-            .is_some_and(|exclude| exclude.is_match(&relative))
-        {
+        if exclude.as_ref().is_some_and(|m| m.is_match(&relative)) {
             if entry.file_type().is_dir() {
                 walker.skip_current_dir();
             }
@@ -118,107 +115,77 @@ fn glob_paths(base_dir: &Path, pattern: &str, exclude: Option<&str>) -> Result<S
         }
 
         if matcher.is_match(&relative) {
-            if path_displays_as_dir(entry.path(), entry.file_type()) {
-                matches.push(format!("{relative}/"));
+            matches.push(if path_displays_as_dir(entry.path(), entry.file_type()) {
+                format!("{relative}/")
             } else {
-                matches.push(relative);
+                relative
+            });
+            if matches.len() >= MAX_GLOB_MATCHES {
+                break;
             }
         }
-
-        if matches.len() >= MAX_GLOB_MATCHES {
-            break;
-        }
     }
 
-    let glob_description = format_glob_description(pattern, exclude);
-    let truncated = matches.len() == MAX_GLOB_MATCHES;
+    let desc = match exclude {
+        Some(_) => format!("{} EXCLUDE {}", pattern, exclude_pattern.unwrap_or("NONE")),
+        None => pattern.to_owned(),
+    };
+
     Ok(format_match_output(
         "GLOB",
-        &glob_description,
+        &desc,
         matches,
-        truncated,
-        format!("[stopped at {MAX_GLOB_MATCHES} matches — narrow your pattern]"),
-        &glob_description,
+        MAX_GLOB_MATCHES,
+        "[stopped at 500 matches — narrow your pattern]",
+        &desc,
     ))
-}
-
-fn compile_glob_matcher(pattern: &str, label: &str) -> Result<GlobMatcher> {
-    Ok(GlobBuilder::new(pattern)
-        .literal_separator(true)
-        .build()
-        .context(format!("invalid glob {label}: {pattern}"))?
-        .compile_matcher())
-}
-
-fn format_glob_description(pattern: &str, exclude: Option<&str>) -> String {
-    match exclude {
-        Some(exclude) => format!("{pattern} EXCLUDE {exclude}"),
-        None => pattern.to_owned(),
-    }
 }
 
 fn search_paths(base_dir: &Path, paths: &[String], patterns: &[String]) -> Result<String> {
     let mut matches = Vec::new();
-    for path in paths {
-        let resolved = resolve_path(base_dir, path)?;
-        let metadata = fs::metadata(&resolved)
-            .context(format!("failed to inspect path: {}", resolved.display()))?;
+
+    'outer: for path in paths {
+        let (resolved, metadata) = resolve_with_metadata(base_dir, path)?;
 
         if metadata.is_dir() {
-            let walker = WalkDir::new(&resolved)
+            for entry in WalkDir::new(&resolved)
                 .follow_links(false)
                 .sort_by_file_name()
                 .min_depth(1)
                 .max_depth(MAX_SEARCH_DEPTH)
-                .into_iter();
-
-            for entry in walker {
+                .into_iter()
+            {
                 let entry =
                     entry.context(format!("failed to walk directory: {}", resolved.display()))?;
-                let file_type = entry.file_type();
-
-                if file_type.is_symlink() || !file_type.is_file() {
+                let ty = entry.file_type();
+                if ty.is_symlink() || !ty.is_file() {
                     continue;
                 }
 
                 push_search_matches(base_dir, entry.path(), patterns, &mut matches)?;
                 if matches.len() >= MAX_SEARCH_MATCHES {
-                    break;
+                    break 'outer;
                 }
             }
         } else {
             push_search_matches(base_dir, &resolved, patterns, &mut matches)?;
-        }
-
-        if matches.len() >= MAX_SEARCH_MATCHES {
-            break;
+            if matches.len() >= MAX_SEARCH_MATCHES {
+                break;
+            }
         }
     }
 
-    let truncated = matches.len() == MAX_SEARCH_MATCHES;
-    let description = format!("{} {}", join_values(paths), join_values(patterns));
-    let truncate_context = format!("{} {}", join_values(patterns), join_values(paths));
+    let desc = format!("{} {}", paths.join("|"), patterns.join("|"));
+    let ctx = format!("{} {}", patterns.join("|"), paths.join("|"));
+
     Ok(format_match_output(
         "SEARCH",
-        &description,
+        &desc,
         matches,
-        truncated,
-        format!("[stopped at {MAX_SEARCH_MATCHES} matches — narrow your pattern or path]"),
-        &truncate_context,
+        MAX_SEARCH_MATCHES,
+        "[stopped at 200 matches — narrow your pattern or path]",
+        &ctx,
     ))
-}
-
-fn is_likely_binary(path: &Path) -> bool {
-    let mut file = match fs::File::open(path) {
-        Ok(file) => file,
-        Err(_) => return false,
-    };
-
-    let mut buffer = [0_u8; 500];
-    match file.read(&mut buffer) {
-        Ok(bytes_read) => buffer[..bytes_read].contains(&0),
-        Err(_) => false,
-    }
 }
 
 fn push_search_matches(
@@ -232,13 +199,13 @@ fn push_search_matches(
     }
 
     let content = match fs::read_to_string(path) {
-        Ok(c) => c,
+        Ok(content) => content,
         Err(_) => return Ok(()),
     };
 
-    for (idx, line) in content.lines().enumerate() {
-        if patterns.iter().any(|pattern| line.contains(pattern)) {
-            matches.push(format!("{}:{}:{}", display_relative(base_dir, path), idx + 1, line));
+    for (i, line) in content.lines().enumerate() {
+        if patterns.iter().any(|p| line.contains(p)) {
+            matches.push(format!("{}:{}:{}", display_relative(base_dir, path), i + 1, line));
             if matches.len() >= MAX_SEARCH_MATCHES {
                 break;
             }
@@ -248,54 +215,36 @@ fn push_search_matches(
     Ok(())
 }
 
-fn read_dir_rows(path: &Path) -> Result<Vec<(String, &'static str)>> {
-    let mut rows = fs::read_dir(path)
-        .context(format!("failed to list directory: {}", path.display()))?
-        .map(|entry| build_dir_row(entry, path))
-        .collect::<Result<Vec<_>>>()?;
-    rows.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(rows)
-}
-
-fn build_dir_row(entry: std::io::Result<fs::DirEntry>, parent: &Path) -> Result<(String, &'static str)> {
-    let entry = entry.context(format!("failed to list directory: {}", parent.display()))?;
-    let path = entry.path();
-    let file_type = entry
-        .file_type()
-        .context(format!("failed to inspect path: {}", path.display()))?;
-    let name = entry.file_name().to_string_lossy().into_owned();
-    let kind = if path_displays_as_dir(&path, file_type) {
-        "DIR"
-    } else {
-        "FILE"
+fn is_likely_binary(path: &Path) -> bool {
+    let mut file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(_) => return false,
     };
-    Ok((name, kind))
-}
 
-fn path_displays_as_dir(path: &Path, file_type: std::fs::FileType) -> bool {
-    if file_type.is_dir() {
-        return true;
+    let mut buf = [0_u8; 500];
+    match file.read(&mut buf) {
+        Ok(n) => buf[..n].contains(&0),
+        Err(_) => false,
     }
-
-    file_type.is_symlink() && fs::metadata(path).map(|metadata| metadata.is_dir()).unwrap_or(false)
 }
 
-fn normalized_relative(base_dir: &Path, path: &Path) -> String {
-    display_relative(base_dir, path).replace('\\', "/")
-}
-
-fn join_values(values: &[String]) -> String {
-    values.join("|")
+fn compile_glob_matcher(pattern: &str, label: &str) -> Result<GlobMatcher> {
+    Ok(GlobBuilder::new(pattern)
+        .literal_separator(true)
+        .build()
+        .context(format!("invalid glob {label}: {pattern}"))?
+        .compile_matcher())
 }
 
 fn format_match_output(
     label: &str,
     description: &str,
     matches: Vec<String>,
-    truncated: bool,
-    truncated_notice: String,
-    truncate_context: &str,
+    max: usize,
+    truncated_notice: &str,
+    context: &str,
 ) -> String {
+    let truncated = matches.len() == max;
     let mut lines = vec![format!("{label} {description}")];
 
     if matches.is_empty() {
@@ -303,11 +252,18 @@ fn format_match_output(
     } else {
         lines.extend(matches);
         if truncated {
-            lines.push(truncated_notice);
+            lines.push(truncated_notice.to_owned());
         }
     }
 
-    truncate_output(lines.join("\n"), truncate_context)
+    truncate_output(lines.join("\n"), context)
+}
+
+fn resolve_with_metadata(base_dir: &Path, path: &str) -> Result<(PathBuf, fs::Metadata)> {
+    let resolved = resolve_path(base_dir, path)?;
+    let metadata = fs::metadata(&resolved)
+        .context(format!("failed to inspect path: {}", resolved.display()))?;
+    Ok((resolved, metadata))
 }
 
 fn resolve_path(base_dir: &Path, path: &str) -> Result<PathBuf> {
@@ -315,16 +271,17 @@ fn resolve_path(base_dir: &Path, path: &str) -> Result<PathBuf> {
     if candidate.is_absolute() {
         bail!("absolute paths are not allowed");
     }
-    let base_dir = fs::canonicalize(base_dir).context(format!(
-        "failed to resolve base directory: {}",
-        base_dir.display()
-    ))?;
+
+    let base_dir = fs::canonicalize(base_dir)
+        .context(format!("failed to resolve base directory: {}", base_dir.display()))?;
     let joined = base_dir.join(candidate);
     let resolved =
         fs::canonicalize(&joined).context(format!("path does not exist: {}", joined.display()))?;
+
     if !resolved.starts_with(&base_dir) {
         bail!("path escapes the workspace");
     }
+
     Ok(resolved)
 }
 
@@ -333,6 +290,10 @@ fn display_relative(base_dir: &Path, path: &Path) -> String {
         .unwrap_or(path)
         .display()
         .to_string()
+}
+
+fn path_displays_as_dir(path: &Path, ty: fs::FileType) -> bool {
+    ty.is_dir() || (ty.is_symlink() && fs::metadata(path).map(|m| m.is_dir()).unwrap_or(false))
 }
 
 fn format_system_time(time: std::time::SystemTime) -> Option<String> {
@@ -344,6 +305,7 @@ fn format_system_time(time: std::time::SystemTime) -> Option<String> {
 
 fn format_permissions(metadata: &fs::Metadata) -> String {
     let readonly = metadata.permissions().readonly();
+
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -352,6 +314,7 @@ fn format_permissions(metadata: &fs::Metadata) -> String {
             metadata.permissions().mode() & 0o777
         )
     }
+
     #[cfg(not(unix))]
     {
         format!("readonly={readonly}")
@@ -362,6 +325,7 @@ fn truncate_output(mut output: String, context: &str) -> String {
     if output.len() <= MAX_TOOL_OUTPUT_BYTES {
         return output;
     }
+
     let original_len = output.len();
     let boundary = output
         .char_indices()
@@ -369,6 +333,7 @@ fn truncate_output(mut output: String, context: &str) -> String {
         .take_while(|&i| i < MAX_TOOL_OUTPUT_BYTES)
         .last()
         .unwrap_or(0);
+
     output.truncate(boundary);
     output.push_str(&format!(
         "\n[truncated: {} bytes omitted for '{}' — use a narrower path or pattern]",
