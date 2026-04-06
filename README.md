@@ -78,7 +78,7 @@ CLI flags override config values for the current invocation.
 
 ## Using Tools
 
-Drover allows the model to interact with the filesystem, searching, listing, and reading files. Useful tool outputs help improve generation quality. You can add command invocations within your prompt, like so: `TOOL: read|file.txt`. When provided, `drover` sends this invocation and presents the contents in subsequent prompt iterations until you ask the model to avoid tool invocations through `--no-tools`.
+Drover allows the model to interact with the filesystem, searching, listing, and reading files. Useful tool outputs help improve generation quality. You can add command invocations within your prompt, like so: `TOOL: read file.txt`. When provided, `drover` sends this invocation and presents the contents in subsequent prompt iterations until you ask the model to avoid tool invocations through `--no-tools`.
 
 For example:
 
@@ -88,10 +88,11 @@ cat file.txt | drover "Summarize key points from this file"
 
 This sends `file.txt` to Ollama and uses the contents in answering the prompt. It supports the following tools:
 
-- `TOOL: read|<path>`: Reads the contents of a file.
-- `TOOL: ls|<path>`: Lists the contents of a directory.
-- `TOOL: stat|<path>`: Returns metadata about a file (size, modified time, etc.).
-- `TOOL: tree|<path>|<depth>`: Recursively lists a directory structure up to a specified depth.
-- `TOOL: glob|<pattern>`: Finds files matching a pattern (e.g., `**.txt`).
-- `TOOL: search|<pattern>|<path>`: Searches for text within files.
-- `TOOL: env`: Lists environment variables.
+- `TOOL: read <path>`: Reads the contents of a file.
+- `TOOL: ls <path>`: Lists the contents of a directory.
+- `TOOL: stat <path>`: Returns metadata about a file (size, modified time, etc.).
+- `TOOL: tree <path> [depth]`: Recursively lists a directory structure up to a specified depth. When omitted, `depth` defaults to `2`.
+- `TOOL: glob <pattern> [exclude]`: Finds files matching a pattern with an optional exclude glob (e.g., `TOOL: glob **/*.rs target/**/*`).
+- `TOOL: search <pattern> <path>`: Searches for text within files.
+
+If an argument contains spaces, quote it, for example `TOOL: read "my dir/file.txt"` or `TOOL: search "my handler fn" src`.
