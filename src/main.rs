@@ -1,8 +1,7 @@
 pub mod cli;
-pub mod config;
-pub mod ollama;
-pub mod run;
+pub mod services;
 pub mod tools;
+pub mod run;
 
 use cli::{Cli, HELP_TEXT};
 
