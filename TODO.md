@@ -1,4 +1,4 @@
-# TODO — drover v0.5.0
+# TODO — drover v0.5.1
 
 @created: 2026-04-04
 @modified: 2026-04-06
@@ -70,4 +70,5 @@
 - [x] bug: clarify the model is not allowed to use absolute paths
       @created 2026-04-06 23:26
       @completed 2026-04-06 23:26
+      @completed_version 0.5.1
 
