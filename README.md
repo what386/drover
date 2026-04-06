@@ -42,7 +42,7 @@ drover --model llama3 "prompt"
 drover --host http://localhost:11434 "prompt"
 drover --system "you are a poet" "prompt"
 drover --temp 0.7 "prompt"
-drover --no-tools "prompt"
+drover --tools false "prompt"
 drover --script-output "prompt"
 drover --verbose "prompt"
 
