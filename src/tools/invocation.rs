@@ -3,7 +3,7 @@ use anyhow::{Context, Result, bail};
 use globset::{GlobBuilder, GlobMatcher};
 use std::fs;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use walkdir::WalkDir;
@@ -120,7 +120,7 @@ fn glob_paths(base_dir: &Path, pattern: &str, exclude_pattern: Option<&str>) -> 
 
     while let Some(entry) = walker.next() {
         let entry = entry.context(format!("failed to walk directory: {}", base_dir.display()))?;
-        let relative = display_relative(base_dir, entry.path()).replace('\\', "/");
+        let relative = display_relative(base_dir, entry.path());
 
         if exclude.as_ref().is_some_and(|m| m.is_match(&relative)) {
             if entry.file_type().is_dir() {
@@ -288,8 +288,13 @@ fn resolve_with_metadata(base_dir: &Path, path: &str) -> Result<(PathBuf, fs::Me
 
 fn resolve_path(base_dir: &Path, path: &str) -> Result<PathBuf> {
     let candidate = Path::new(path);
-    if candidate.is_absolute() {
-        bail!("absolute paths are not allowed");
+    if candidate.is_absolute()
+        || matches!(
+            candidate.components().next(),
+            Some(Component::Prefix(_)) | Some(Component::RootDir)
+        )
+    {
+        bail!("absolute or prefixed paths are not allowed");
     }
 
     let base_dir = fs::canonicalize(base_dir).context(format!(
@@ -308,10 +313,30 @@ fn resolve_path(base_dir: &Path, path: &str) -> Result<PathBuf> {
 }
 
 fn display_relative(base_dir: &Path, path: &Path) -> String {
-    path.strip_prefix(base_dir)
-        .unwrap_or(path)
+    display_relative_path(base_dir, path)
         .display()
         .to_string()
+        .replace('\\', "/")
+}
+
+fn display_relative_path(base_dir: &Path, path: &Path) -> PathBuf {
+    if let Ok(relative) = path.strip_prefix(base_dir) {
+        return relative.to_path_buf();
+    }
+
+    if let Ok(canonical_base_dir) = fs::canonicalize(base_dir) {
+        if let Ok(relative) = path.strip_prefix(&canonical_base_dir) {
+            return relative.to_path_buf();
+        }
+
+        if let Ok(canonical_path) = fs::canonicalize(path) {
+            if let Ok(relative) = canonical_path.strip_prefix(&canonical_base_dir) {
+                return relative.to_path_buf();
+            }
+        }
+    }
+
+    path.to_path_buf()
 }
 
 fn path_displays_as_dir(path: &Path, ty: fs::FileType) -> bool {
@@ -638,14 +663,30 @@ mod tests {
     #[test]
     fn rejects_absolute_path() {
         let root = make_test_dir();
+        let absolute = std::env::temp_dir().join("drover-tools-test-absolute.txt");
         let err = execute_tool_call(
             &root,
             &ToolCall::Read {
-                path: "/etc/passwd".to_owned(),
+                path: absolute.display().to_string(),
             },
         )
         .unwrap_err();
-        assert!(err.to_string().contains("absolute"));
+        assert!(err.to_string().contains("not allowed"));
+        cleanup(&root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rejects_rooted_path_without_drive() {
+        let root = make_test_dir();
+        let err = execute_tool_call(
+            &root,
+            &ToolCall::Read {
+                path: r"\windows\system32".to_owned(),
+            },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("not allowed"));
         cleanup(&root);
     }
 
