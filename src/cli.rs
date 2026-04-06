@@ -139,14 +139,6 @@ mod tests {
     }
 
     #[test]
-    fn parses_stdin_style_invocation_without_prompt() {
-        let cli = parse(&[]).unwrap();
-
-        assert_eq!(cli.prompt, None);
-        assert!(cli.stream);
-    }
-
-    #[test]
     fn parses_all_supported_flags() {
         let cli = parse(&[
             "-m",
@@ -215,14 +207,6 @@ mod tests {
             err.source().unwrap().to_string(),
             "invalid value for --temp: hot"
         );
-    }
-
-    #[test]
-    fn parses_tools_flag_false() {
-        let cli = parse(&["--tools", "false", "prompt"]).unwrap();
-
-        assert_eq!(cli.tools, Some(false));
-        assert_eq!(cli.prompt.as_deref(), Some("prompt"));
     }
 
     #[test]

@@ -477,7 +477,7 @@ mod tests {
     use super::{Cli, StreamProbe, StreamProbeAction, StreamProbeResult};
     use crate::cli::HELP_TEXT;
     use crate::services::config::Config;
-    use crate::tools::ToolCall;
+    use crate::tools::{TOOL_SYSTEM_PROMPT, ToolCall};
 
     #[test]
     fn resolve_prompt_prefers_cli_prompt() {
@@ -636,10 +636,12 @@ mod tests {
     }
 
     #[test]
-    fn effective_system_prompt_appends_tool_instructions() {
+    fn effective_system_prompt_appends_current_tool_prompt() {
         let prompt = Cli::effective_system_prompt(Some("be concise"), true);
-        assert!(prompt.contains("be concise"));
-        assert!(prompt.contains("TOOL: read"));
+        assert!(prompt.starts_with("be concise\n\n"));
+        assert!(prompt.contains("Emit tool calls as a single line:"));
+        assert!(prompt.contains("Available tools:"));
+        assert!(prompt.ends_with(TOOL_SYSTEM_PROMPT));
     }
 
     #[test]

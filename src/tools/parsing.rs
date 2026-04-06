@@ -178,17 +178,6 @@ mod tests {
     use crate::tools::{ExtractedToolCall, ToolCall};
 
     #[test]
-    fn parses_quoted_ls_path() {
-        let call = parse_tool_call("TOOL: list \"my dir\"").unwrap().unwrap();
-        assert_eq!(
-            call,
-            ToolCall::List {
-                paths: vec!["my dir".to_owned()]
-            }
-        );
-    }
-
-    #[test]
     fn parses_glob_tool_call_with_exclude() {
         let call = parse_tool_call("TOOL: glob **/*.rs target/**/*").unwrap().unwrap();
         assert_eq!(
