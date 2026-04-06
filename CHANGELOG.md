@@ -2,6 +2,13 @@
 
 *Generated on 2026-04-06*
 
+## 0.5.1 — 2026-04-06
+
+### Changes
+
+- bug: clarify the model is not allowed to use absolute paths
+
+
 ## 0.5.0 — 2026-04-06
 
 ### Changes
