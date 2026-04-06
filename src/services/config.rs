@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{anyhow, bail, Context, Result};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -6,9 +6,10 @@ use toml::Value;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
-    pub model: Option<String>,
-    pub host: Option<String>,
-    pub temp: Option<f32>,
+    pub model: String,
+    pub host: String,
+    pub temp: f32,
+    pub allow_tools: bool,
 }
 
 impl Config {
@@ -31,20 +32,47 @@ impl Config {
             .as_table()
             .context("config root must be a TOML table")?;
 
-        let model = optional_string(table.get("model"), "model")?;
-        let host = optional_string(table.get("host"), "host")?;
-        let temp = optional_float(table.get("temp"), "temp")?;
+        let mut config = Self::default();
 
-        Ok(Self { model, host, temp })
+        if let Some(value) = table.get("model") {
+            config.model = value
+                .as_str()
+                .context("config key `model` must be a string")?
+                .to_owned();
+        }
+
+        if let Some(value) = table.get("host") {
+            config.host = value
+                .as_str()
+                .context("config key `host` must be a string")?
+                .to_owned();
+        }
+
+        if let Some(value) = table.get("temp") {
+            config.temp = match value {
+                Value::Float(v) => *v as f32,
+                Value::Integer(v) => *v as f32,
+                _ => bail!("config key `temp` must be a number"),
+            };
+        }
+
+        if let Some(value) = table.get("allow_tools") {
+            config.allow_tools = value
+                .as_bool()
+                .context("config key `allow_tools` must be a boolean")?;
+        }
+
+        Ok(config)
     }
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            model: Some("llama3".to_owned()),
-            host: Some("http://localhost:11434".to_owned()),
-            temp: Some(0.7),
+            model: "llama3".to_owned(),
+            host: "http://localhost:11434".to_owned(),
+            temp: 0.7,
+            allow_tools: false,
         }
     }
 }
@@ -55,23 +83,6 @@ fn config_path() -> Result<PathBuf> {
         .join(".config")
         .join("drover")
         .join("config.toml"))
-}
-
-fn optional_string(value: Option<&Value>, key: &str) -> Result<Option<String>> {
-    match value {
-        None => Ok(None),
-        Some(Value::String(value)) => Ok(Some(value.clone())),
-        Some(_) => bail!("config key `{key}` must be a string"),
-    }
-}
-
-fn optional_float(value: Option<&Value>, key: &str) -> Result<Option<f32>> {
-    match value {
-        None => Ok(None),
-        Some(Value::Float(value)) => Ok(Some(*value as f32)),
-        Some(Value::Integer(value)) => Ok(Some(*value as f32)),
-        Some(_) => bail!("config key `{key}` must be a number"),
-    }
 }
 
 #[cfg(test)]
@@ -90,9 +101,10 @@ host = "http://localhost:11434"
         )
         .unwrap();
 
-        assert_eq!(config.model, None);
-        assert_eq!(config.host.as_deref(), Some("http://localhost:11434"));
-        assert_eq!(config.temp, None);
+        assert_eq!(config.model, "llama3");
+        assert_eq!(config.host, "http://localhost:11434");
+        assert_eq!(config.temp, 0.7);
+        assert!(!config.allow_tools);
     }
 
     #[test]
@@ -107,15 +119,19 @@ host = "http://localhost:11434"
     #[test]
     fn rejects_non_string_model() {
         let err = Config::parse("model = 42").unwrap_err();
-
         assert_eq!(err.to_string(), "config key `model` must be a string");
     }
 
     #[test]
     fn rejects_non_numeric_temp() {
         let err = Config::parse(r#"temp = "hot""#).unwrap_err();
-
         assert_eq!(err.to_string(), "config key `temp` must be a number");
+    }
+
+    #[test]
+    fn rejects_non_boolean_allow_tools() {
+        let err = Config::parse(r#"allow_tools = "yes""#).unwrap_err();
+        assert_eq!(err.to_string(), "config key `allow_tools` must be a boolean");
     }
 
     #[test]
@@ -129,15 +145,17 @@ host = "http://localhost:11434"
 model = "llama3"
 host = "http://localhost:11434"
 temp = 1
+allow_tools = true
 "#,
         )
         .unwrap();
 
         let config = Config::load_from_path(&path).unwrap();
 
-        assert_eq!(config.model.as_deref(), Some("llama3"));
-        assert_eq!(config.host.as_deref(), Some("http://localhost:11434"));
-        assert_eq!(config.temp, Some(1.0));
+        assert_eq!(config.model, "llama3");
+        assert_eq!(config.host, "http://localhost:11434");
+        assert_eq!(config.temp, 1.0);
+        assert!(config.allow_tools);
 
         fs::remove_file(&path).unwrap();
         fs::remove_dir_all(parent).unwrap();

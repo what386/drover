@@ -20,19 +20,20 @@ impl Cli {
         let request = self.build_request(&config, prompt)?;
         let host = self.resolve_host(&config)?;
         let model = request.model.clone();
+        let tools_enabled = self.tools.unwrap_or(config.allow_tools);
         let effective_system_prompt =
-            Self::effective_system_prompt(request.system.as_deref(), !self.no_tools);
+            Self::effective_system_prompt(request.system.as_deref(), tools_enabled);
         let client = OllamaClient::new(host.clone());
         let started_at = Instant::now();
-        let final_response = if self.no_tools {
-            self.run_without_tools(&client, &request, &effective_system_prompt)?
-        } else {
+        let final_response = if tools_enabled {
             self.run_tool_loop(
                 &client,
                 &request,
                 &effective_system_prompt,
                 env::current_dir()?,
             )?
+        } else {
+            self.run_without_tools(&client, &request, &effective_system_prompt)?
         };
 
         if self.verbose {
@@ -88,10 +89,9 @@ impl Cli {
         let model = self
             .model
             .clone()
-            .or_else(|| config.model.clone())
-            .ok_or_else(|| anyhow!("config is missing `model`"))?;
+            .unwrap_or_else(|| config.model.clone());
 
-        let temp = self.temp.or(config.temp);
+        let temp = self.temp.or(Some(config.temp));
 
         Ok(GenerateRequest {
             model,
@@ -105,7 +105,7 @@ impl Cli {
     fn resolve_host(&self, config: &Config) -> Result<String> {
         self.host
             .clone()
-            .or_else(|| config.host.clone())
+            .or_else(|| Some(config.host.clone()))
             .ok_or_else(|| anyhow!("config is missing `host`"))
     }
 
@@ -486,7 +486,7 @@ mod tests {
             model: None,
             system: None,
             temp: None,
-            no_tools: false,
+            tools: None,
             stream: true,
             verbose: false,
             prompt: Some("prompt".to_owned()),
@@ -535,15 +535,16 @@ mod tests {
             model: Some("cli-model".to_owned()),
             system: Some("sys".to_owned()),
             temp: Some(0.1),
-            no_tools: false,
+            tools: Some(false),
             stream: false,
             verbose: false,
             prompt: Some("prompt".to_owned()),
         };
         let config = Config {
-            model: Some("cfg-model".to_owned()),
-            host: Some("http://localhost:11434".to_owned()),
-            temp: Some(0.7),
+            model: "cfg-model".to_owned(),
+            host: "http://localhost:11434".to_owned(),
+            temp: 0.7,
+            allow_tools: true,
         };
 
         let request = cli.build_request(&config, "prompt".to_owned()).unwrap();
@@ -562,7 +563,7 @@ mod tests {
             model: None,
             system: None,
             temp: None,
-            no_tools: false,
+            tools: None,
             stream: true,
             verbose: false,
             prompt: None,
@@ -575,6 +576,63 @@ mod tests {
         assert_eq!(request.temp, Some(0.7));
         assert!(request.stream);
         assert_eq!(cli.resolve_host(&config).unwrap(), "http://localhost:11434");
+    }
+
+    #[test]
+    fn tools_enabled_falls_back_to_config() {
+        let cli = Cli {
+            host: None,
+            model: None,
+            system: None,
+            temp: None,
+            tools: None,
+            stream: true,
+            verbose: false,
+            prompt: None,
+        };
+
+        let disabled_config = Config {
+            allow_tools: false,
+            ..Config::default()
+        };
+        let enabled_config = Config {
+            allow_tools: true,
+            ..Config::default()
+        };
+
+        assert!(!cli.tools.unwrap_or(disabled_config.allow_tools));
+        assert!(cli.tools.unwrap_or(enabled_config.allow_tools));
+    }
+
+    #[test]
+    fn cli_tools_override_config() {
+        let cli_enabled = Cli {
+            host: None,
+            model: None,
+            system: None,
+            temp: None,
+            tools: Some(true),
+            stream: true,
+            verbose: false,
+            prompt: None,
+        };
+        let cli_disabled = Cli {
+            host: None,
+            model: None,
+            system: None,
+            temp: None,
+            tools: Some(false),
+            stream: true,
+            verbose: false,
+            prompt: None,
+        };
+        let config = Config {
+            allow_tools: false,
+            ..Config::default()
+        };
+
+        assert!(cli_enabled.tools.unwrap_or(config.allow_tools));
+        assert!(!cli_disabled.tools.unwrap_or(true));
     }
 
     #[test]

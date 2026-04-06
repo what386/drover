@@ -6,7 +6,7 @@ pub struct Cli {
     pub model: Option<String>,
     pub system: Option<String>,
     pub temp: Option<f32>,
-    pub no_tools: bool,
+    pub tools: Option<bool>,
     pub stream: bool,
     pub verbose: bool,
     pub prompt: Option<String>,
@@ -24,7 +24,7 @@ pub const HELP_TEXT: &str = concat!(
     "  --model, -m <name> Model selection\n",
     "  --system, -s <prompt>  System prompt\n",
     "  --temp, -t <value> Temperature\n",
-    "  --no-tools         Disable tool use for this run\n",
+    "  --tools <true|false>  Enable or disable tool use for this run\n",
     "  --script-output    Buffer output and suppress transient callbacks\n",
     "  --verbose, -v      Show model and timing details on stderr\n",
     "  --version          Show the crate version and exit\n",
@@ -47,7 +47,7 @@ impl Cli {
             model: None,
             system: None,
             temp: None,
-            no_tools: false,
+            tools: None,
             stream: true,
             verbose: false,
             prompt: None,
@@ -69,11 +69,12 @@ impl Cli {
                     let value = next_value(&mut args, "--temp")?;
                     cli.temp = Some(parse_temp(&value)?);
                 }
+                "--tools" => {
+                    let value = next_value(&mut args, "--tools")?;
+                    cli.tools = Some(parse_bool_flag(&value, "--tools")?);
+                }
                 "--script-output" => {
                     cli.stream = false;
-                }
-                "--no-tools" => {
-                    cli.no_tools = true;
                 }
                 "--verbose" | "-v" => {
                     cli.verbose = true;
@@ -107,6 +108,14 @@ fn parse_temp(value: &str) -> Result<f32> {
         .context(format!("invalid value for --temp: {value}"))
 }
 
+fn parse_bool_flag(value: &str, flag: &str) -> Result<bool> {
+    match value {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => bail!("invalid value for {flag}: {value}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Cli;
@@ -124,7 +133,7 @@ mod tests {
         assert_eq!(cli.model, None);
         assert_eq!(cli.system, None);
         assert_eq!(cli.temp, None);
-        assert!(!cli.no_tools);
+        assert_eq!(cli.tools, None);
         assert!(cli.stream);
         assert!(!cli.verbose);
     }
@@ -147,7 +156,8 @@ mod tests {
             "-s",
             "you are a poet",
             "--script-output",
-            "--no-tools",
+            "--tools",
+            "false",
             "-v",
             "write a sonnet",
         ])
@@ -157,7 +167,7 @@ mod tests {
         assert_eq!(cli.model.as_deref(), Some("llama3"));
         assert_eq!(cli.system.as_deref(), Some("you are a poet"));
         assert!(!cli.stream);
-        assert!(cli.no_tools);
+        assert_eq!(cli.tools, Some(false));
         assert!(cli.verbose);
         assert_eq!(cli.prompt.as_deref(), Some("write a sonnet"));
     }
@@ -208,10 +218,45 @@ mod tests {
     }
 
     #[test]
-    fn parses_no_tools_flag() {
-        let cli = parse(&["--no-tools", "prompt"]).unwrap();
+    fn parses_tools_flag_false() {
+        let cli = parse(&["--tools", "false", "prompt"]).unwrap();
 
-        assert!(cli.no_tools);
+        assert_eq!(cli.tools, Some(false));
         assert_eq!(cli.prompt.as_deref(), Some("prompt"));
+    }
+
+    #[test]
+    fn parses_tools_flag_true() {
+        let cli = parse(&["--tools", "true", "prompt"]).unwrap();
+
+        assert_eq!(cli.tools, Some(true));
+        assert_eq!(cli.prompt.as_deref(), Some("prompt"));
+    }
+
+    #[test]
+    fn rejects_missing_tools_value() {
+        let err = parse(&["--tools"]).unwrap_err();
+
+        assert_eq!(err.source().unwrap().to_string(), "missing value for --tools");
+    }
+
+    #[test]
+    fn rejects_invalid_tools_value() {
+        let err = parse(&["--tools", "maybe"]).unwrap_err();
+
+        assert_eq!(
+            err.source().unwrap().to_string(),
+            "invalid value for --tools: maybe"
+        );
+    }
+
+    #[test]
+    fn rejects_legacy_no_tools_flag() {
+        let err = parse(&["--no-tools"]).unwrap_err();
+
+        assert_eq!(
+            err.source().unwrap().to_string(),
+            "unknown flag: --no-tools"
+        );
     }
 }
