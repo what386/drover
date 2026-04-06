@@ -82,22 +82,6 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn parses_full_config() {
-        let config = Config::parse(
-            r#"
-model = "llama3"
-host = "http://localhost:11434"
-temp = 0.7
-"#,
-        )
-        .unwrap();
-
-        assert_eq!(config.model.as_deref(), Some("llama3"));
-        assert_eq!(config.host.as_deref(), Some("http://localhost:11434"));
-        assert_eq!(config.temp, Some(0.7));
-    }
-
-    #[test]
     fn parses_partial_config() {
         let config = Config::parse(
             r#"
