@@ -16,10 +16,10 @@ const MAX_SEARCH_DEPTH: usize = 8;
 pub fn execute_tool_call(base_dir: &Path, call: &ToolCall) -> Result<String> {
     match call {
         ToolCall::Read { path } => read_file(base_dir, path),
-        ToolCall::List { path } => list_path(base_dir, path),
+        ToolCall::List { paths } => list_paths(base_dir, paths),
         ToolCall::Stat { path } => stat_path(base_dir, path),
         ToolCall::Glob { pattern, exclude } => glob_paths(base_dir, pattern, exclude.as_deref()),
-        ToolCall::Search { pattern, path } => search_path(base_dir, pattern, path),
+        ToolCall::Search { paths, patterns } => search_paths(base_dir, paths, patterns),
     }
 }
 
@@ -35,6 +35,15 @@ fn read_file(base_dir: &Path, path: &str) -> Result<String> {
         ),
         path,
     ))
+}
+
+fn list_paths(base_dir: &Path, paths: &[String]) -> Result<String> {
+    let blocks = paths
+        .iter()
+        .map(|path| list_path(base_dir, path))
+        .collect::<Result<Vec<_>>>()?;
+    let context = join_values(paths);
+    Ok(truncate_output(blocks.join("\n\n"), &context))
 }
 
 fn list_path(base_dir: &Path, path: &str) -> Result<String> {
@@ -148,47 +157,54 @@ fn format_glob_description(pattern: &str, exclude: Option<&str>) -> String {
     }
 }
 
-fn search_path(base_dir: &Path, pattern: &str, path: &str) -> Result<String> {
-    let resolved = resolve_path(base_dir, path)?;
+fn search_paths(base_dir: &Path, paths: &[String], patterns: &[String]) -> Result<String> {
     let mut matches = Vec::new();
-    let rel = display_relative(base_dir, &resolved);
-    let metadata = fs::metadata(&resolved)
-        .context(format!("failed to inspect path: {}", resolved.display()))?;
+    for path in paths {
+        let resolved = resolve_path(base_dir, path)?;
+        let metadata = fs::metadata(&resolved)
+            .context(format!("failed to inspect path: {}", resolved.display()))?;
 
-    if metadata.is_dir() {
-        let walker = WalkDir::new(&resolved)
-            .follow_links(false)
-            .sort_by_file_name()
-            .min_depth(1)
-            .max_depth(MAX_SEARCH_DEPTH)
-            .into_iter();
+        if metadata.is_dir() {
+            let walker = WalkDir::new(&resolved)
+                .follow_links(false)
+                .sort_by_file_name()
+                .min_depth(1)
+                .max_depth(MAX_SEARCH_DEPTH)
+                .into_iter();
 
-        for entry in walker {
-            let entry =
-                entry.context(format!("failed to walk directory: {}", resolved.display()))?;
-            let file_type = entry.file_type();
+            for entry in walker {
+                let entry =
+                    entry.context(format!("failed to walk directory: {}", resolved.display()))?;
+                let file_type = entry.file_type();
 
-            if file_type.is_symlink() || !file_type.is_file() {
-                continue;
+                if file_type.is_symlink() || !file_type.is_file() {
+                    continue;
+                }
+
+                push_search_matches(base_dir, entry.path(), patterns, &mut matches)?;
+                if matches.len() >= MAX_SEARCH_MATCHES {
+                    break;
+                }
             }
-
-            push_search_matches(base_dir, entry.path(), pattern, &mut matches)?;
-            if matches.len() >= MAX_SEARCH_MATCHES {
-                break;
-            }
+        } else {
+            push_search_matches(base_dir, &resolved, patterns, &mut matches)?;
         }
-    } else {
-        push_search_matches(base_dir, &resolved, pattern, &mut matches)?;
+
+        if matches.len() >= MAX_SEARCH_MATCHES {
+            break;
+        }
     }
 
     let truncated = matches.len() == MAX_SEARCH_MATCHES;
+    let description = format!("{} {}", join_values(paths), join_values(patterns));
+    let truncate_context = format!("{} {}", join_values(patterns), join_values(paths));
     Ok(format_match_output(
         "SEARCH",
-        &format!("{pattern} {rel}"),
+        &description,
         matches,
         truncated,
         format!("[stopped at {MAX_SEARCH_MATCHES} matches — narrow your pattern or path]"),
-        pattern,
+        &truncate_context,
     ))
 }
 
@@ -208,7 +224,7 @@ fn is_likely_binary(path: &Path) -> bool {
 fn push_search_matches(
     base_dir: &Path,
     path: &Path,
-    pattern: &str,
+    patterns: &[String],
     matches: &mut Vec<String>,
 ) -> Result<()> {
     if is_likely_binary(path) {
@@ -221,13 +237,8 @@ fn push_search_matches(
     };
 
     for (idx, line) in content.lines().enumerate() {
-        if line.contains(pattern) {
-            matches.push(format!(
-                "{}:{}:{}",
-                display_relative(base_dir, path),
-                idx + 1,
-                line
-            ));
+        if patterns.iter().any(|pattern| line.contains(pattern)) {
+            matches.push(format!("{}:{}:{}", display_relative(base_dir, path), idx + 1, line));
             if matches.len() >= MAX_SEARCH_MATCHES {
                 break;
             }
@@ -271,6 +282,10 @@ fn path_displays_as_dir(path: &Path, file_type: std::fs::FileType) -> bool {
 
 fn normalized_relative(base_dir: &Path, path: &Path) -> String {
     display_relative(base_dir, path).replace('\\', "/")
+}
+
+fn join_values(values: &[String]) -> String {
+    values.join("|")
 }
 
 fn format_match_output(
@@ -462,14 +477,37 @@ mod tests {
     }
 
     #[test]
+    fn list_supports_multiple_paths() {
+        let root = make_test_dir();
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::create_dir_all(root.join("tests")).unwrap();
+        fs::write(root.join("src/main.rs"), "").unwrap();
+        fs::write(root.join("tests/invocation.rs"), "").unwrap();
+
+        let output = execute_tool_call(
+            &root,
+            &ToolCall::List {
+                paths: vec!["src".to_owned(), "tests".to_owned()],
+            },
+        )
+        .unwrap();
+
+        assert!(output.contains("LS src"));
+        assert!(output.contains("FILE main.rs"));
+        assert!(output.contains("LS tests"));
+        assert!(output.contains("FILE invocation.rs"));
+        cleanup(&root);
+    }
+
+    #[test]
     fn search_skips_binary_extensions() {
         let root = make_test_dir();
         fs::write(root.join("image.png"), b"fake\0binary content with prompt").unwrap();
         let output = execute_tool_call(
             &root,
             &ToolCall::Search {
-                pattern: "prompt".to_owned(),
-                path: ".".to_owned(),
+                paths: vec![".".to_owned()],
+                patterns: vec!["prompt".to_owned()],
             },
         )
         .unwrap();
@@ -484,8 +522,8 @@ mod tests {
         let output = execute_tool_call(
             &root,
             &ToolCall::Search {
-                pattern: "my var".to_owned(),
-                path: ".".to_owned(),
+                paths: vec![".".to_owned()],
+                patterns: vec!["my var".to_owned()],
             },
         )
         .unwrap();
@@ -506,14 +544,36 @@ mod tests {
         let output = execute_tool_call(
             &root,
             &ToolCall::Search {
-                pattern: "needle".to_owned(),
-                path: ".".to_owned(),
+                paths: vec![".".to_owned()],
+                patterns: vec!["needle".to_owned()],
             },
         )
         .unwrap();
 
         assert!(output.contains("1/2/3/4/5/6/7/hit.rs:1:needle"));
         assert!(!output.contains("1/2/3/4/5/6/7/8/miss.rs:1:needle"));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn search_supports_multiple_paths_and_patterns() {
+        let root = make_test_dir();
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::create_dir_all(root.join("tests")).unwrap();
+        fs::write(root.join("src/main.rs"), "alpha\n").unwrap();
+        fs::write(root.join("tests/main.rs"), "beta\n").unwrap();
+
+        let output = execute_tool_call(
+            &root,
+            &ToolCall::Search {
+                paths: vec!["src".to_owned(), "tests".to_owned()],
+                patterns: vec!["alpha".to_owned(), "beta".to_owned()],
+            },
+        )
+        .unwrap();
+
+        assert!(output.contains("src/main.rs:1:alpha"));
+        assert!(output.contains("tests/main.rs:1:beta"));
         cleanup(&root);
     }
 
@@ -562,8 +622,8 @@ mod tests {
         let output = execute_tool_call(
             &root,
             &ToolCall::Search {
-                pattern: "needle".to_owned(),
-                path: ".".to_owned(),
+                paths: vec![".".to_owned()],
+                patterns: vec!["needle".to_owned()],
             },
         )
         .unwrap();

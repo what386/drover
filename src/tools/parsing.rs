@@ -71,15 +71,15 @@ pub fn parse_tool_call(output: &str) -> Result<Option<ToolCall>> {
     }
 
     let body = trimmed["TOOL:".len()..].trim();
-    if body.contains('|') {
-        bail!("legacy `|`-delimited tool syntax is not supported");
-    }
     let parts = tokenize_tool_args(body)?;
 
     let command = parts
         .first()
         .map(String::as_str)
         .ok_or_else(|| anyhow!("missing tool name after `TOOL:`"))?;
+    if command.contains('|') {
+        bail!("legacy `|`-delimited tool syntax is not supported");
+    }
 
     let call = match command {
         "read" => {
@@ -89,9 +89,9 @@ pub fn parse_tool_call(output: &str) -> Result<Option<ToolCall>> {
             }
         }
         "list" => {
-            let args = expect_args(&parts, "list", &["path"], 1)?;
+            let args = expect_args(&parts, "list", &["paths"], 1)?;
             ToolCall::List {
-                path: args[0].clone(),
+                paths: split_multi_value_arg(&args[0], "list", "paths")?,
             }
         }
         "stat" => {
@@ -108,16 +108,31 @@ pub fn parse_tool_call(output: &str) -> Result<Option<ToolCall>> {
             }
         }
         "search" => {
-            let args = expect_args(&parts, "search", &["pattern", "path"], 2)?;
+            let args = expect_args(&parts, "search", &["paths", "patterns"], 2)?;
             ToolCall::Search {
-                pattern: args[0].clone(),
-                path: args[1].clone(),
+                paths: split_multi_value_arg(&args[0], "search", "paths")?,
+                patterns: split_multi_value_arg(&args[1], "search", "patterns")?,
             }
         }
         _ => bail!("unknown tool: {command}"),
     };
 
     Ok(Some(call))
+}
+
+fn split_multi_value_arg(input: &str, tool: &str, arg_name: &str) -> Result<Vec<String>> {
+    let values = input
+        .split('|')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+
+    if values.is_empty() {
+        bail!("missing {arg_name} for `{tool}` tool");
+    }
+
+    Ok(values)
 }
 
 pub fn extract_tool_call(output: &str) -> Result<Option<ExtractedToolCall>> {
@@ -168,7 +183,7 @@ mod tests {
         assert_eq!(
             call,
             ToolCall::List {
-                path: "my dir".to_owned()
+                paths: vec!["my dir".to_owned()]
             }
         );
     }
@@ -187,14 +202,39 @@ mod tests {
 
     #[test]
     fn parses_search_with_spaces_in_pattern() {
-        let call = parse_tool_call("TOOL: search \"my handler fn\" src")
+        let call = parse_tool_call("TOOL: search src \"my handler fn\"")
             .unwrap()
             .unwrap();
         assert_eq!(
             call,
             ToolCall::Search {
-                pattern: "my handler fn".to_owned(),
-                path: "src".to_owned()
+                paths: vec!["src".to_owned()],
+                patterns: vec!["my handler fn".to_owned()]
+            }
+        );
+    }
+
+    #[test]
+    fn parses_multi_path_list_call() {
+        let call = parse_tool_call("TOOL: list \"src|tests/my dir\"").unwrap().unwrap();
+        assert_eq!(
+            call,
+            ToolCall::List {
+                paths: vec!["src".to_owned(), "tests/my dir".to_owned()]
+            }
+        );
+    }
+
+    #[test]
+    fn parses_multi_path_multi_pattern_search() {
+        let call = parse_tool_call("TOOL: search \"src|tests\" \"needle one|needle two\"")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            call,
+            ToolCall::Search {
+                paths: vec!["src".to_owned(), "tests".to_owned()],
+                patterns: vec!["needle one".to_owned(), "needle two".to_owned()]
             }
         );
     }
@@ -267,9 +307,7 @@ mod tests {
             extracted,
             ExtractedToolCall {
                 preamble: "TOOL: nope README.md\nThinking...\n".to_owned(),
-                call: ToolCall::List {
-                    path: "src".to_owned()
-                }
+                call: ToolCall::List { paths: vec!["src".to_owned()] }
             }
         );
     }

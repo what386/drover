@@ -33,17 +33,20 @@ pub const TOOL_SYSTEM_PROMPT: &str = concat!(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToolCall {
     Read { path: String },
-    List { path: String },
+    List { paths: Vec<String> },
     Stat { path: String },
     Glob { pattern: String, exclude: Option<String> },
-    Search { pattern: String, path: String },
+    Search {
+        paths: Vec<String>,
+        patterns: Vec<String>,
+    },
 }
 
 impl ToolCall {
     pub fn display(&self) -> String {
         match self {
             Self::Read { path } => format!("TOOL: read {}", quote_tool_arg(path)),
-            Self::List { path } => format!("TOOL: list {}", quote_tool_arg(path)),
+            Self::List { paths } => format!("TOOL: list {}", quote_tool_arg(&join_tool_values(paths))),
             Self::Stat { path } => format!("TOOL: stat {}", quote_tool_arg(path)),
             Self::Glob { pattern, exclude } => match exclude {
                 Some(exclude) => {
@@ -55,11 +58,11 @@ impl ToolCall {
                 }
                 None => format!("TOOL: glob {}", quote_tool_arg(pattern)),
             },
-            Self::Search { pattern, path } => {
+            Self::Search { paths, patterns } => {
                 format!(
                     "TOOL: search {} {}",
-                    quote_tool_arg(pattern),
-                    quote_tool_arg(path)
+                    quote_tool_arg(&join_tool_values(paths)),
+                    quote_tool_arg(&join_tool_values(patterns))
                 )
             }
         }
@@ -85,6 +88,10 @@ fn quote_tool_arg(arg: &str) -> String {
     }
 }
 
+fn join_tool_values(values: &[String]) -> String {
+    values.join("|")
+}
+
 #[cfg(test)]
 mod tests {
     use super::ToolCall;
@@ -92,10 +99,13 @@ mod tests {
     #[test]
     fn display_quotes_arguments_with_spaces() {
         let call = ToolCall::Search {
-            pattern: "my handler fn".to_owned(),
-            path: "src/my dir".to_owned(),
+            paths: vec!["src/my dir".to_owned(), "tests".to_owned()],
+            patterns: vec!["my handler fn".to_owned(), "other".to_owned()],
         };
-        assert_eq!(call.display(), "TOOL: search \"my handler fn\" \"src/my dir\"");
+        assert_eq!(
+            call.display(),
+            "TOOL: search \"src/my dir|tests\" \"my handler fn|other\""
+        );
     }
 
     #[test]
