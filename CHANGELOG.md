@@ -2,6 +2,14 @@
 
 *Generated on 2026-04-06*
 
+## 0.5.0 — 2026-04-06
+
+### Changes
+
+- feat: redesign filesystem tool calls with multi-path list/search support `feature`
+- feat: add configurable tool access via allow_tools and --tools true/false `feature`, `security`
+
+
 ## 0.4.1 — 2026-04-05
 
 ### Changes
