@@ -1,66 +1,51 @@
 # drover
 
-`drover` is a small CLI for sending prompts to a local Ollama instance.
+`drover` is a CLI tool for interacting with a local Ollama instance. It allows you to send prompts, leveraging various configurations and even tools for filesystem interaction.
 
-It supports:
+## Features
 
-- Prompt input as a positional argument
-- Prompt input from `stdin`
-- Combined prompt plus `stdin` context
-- Model, system prompt, and temperature overrides
-- Host override for one-off Ollama targets
-- Interactive or script-friendly buffered output
-- Read-only filesystem tool invocation during a run
-- A simple TOML config file
+- **Scriptable Input:** Supports prompts via positional arguments, standard input (`stdin`), or a combination of both.
+- **Filesystem Tools:** Enables the model to interact with the filesystem (optional), such as reading files, listing directories and searching for text, allowing it to process local files as context.
 
 ## Installation
 
-1.  **Requirements:**
-    - A running Ollama instance ([https://ollama.com/](https://ollama.com/))
-    - At least one local Ollama model installed (via `ollama pull <model_name>`).
+**Prerequisites:**
 
-2.  **Build:**
+- **Ollama:** You must have a running Ollama instance ([https://ollama.com/](https://ollama.com/)).
+- **Ollama Model:** At least one Ollama model must be downloaded (e.g., `ollama pull llama3`).
 
-    ```bash
-    cargo build
-    ```
+You can install the program via cargo:
 
-    Run it with:
+```bash
+cargo install drover
+```
 
-    ```bash
-    cargo run -- "Write a haiku about Rust"
-    ```
+**Building from Source:**
+
+```bash
+cargo build --release
+```
+
+After building, the compiled binary is located in `./target/debug/drover`.
 
 ## Usage
 
 ```bash
-drover "prompt"
-cat file.txt | drover
-cat file.txt | drover "what is this about?"
+# Basic prompt
+drover "Tell me a story."
 
-drover --model llama3 "prompt"
-drover --host http://localhost:11434 "prompt"
-drover --system "you are a poet" "prompt"
-drover --temp 0.7 "prompt"
-drover --tools false "prompt"
-drover --script-output "prompt"
-drover --verbose "prompt"
+# Prompt with stdin context
+cat my_document.txt | drover "Summarize this document."
 
-drover --help
-drover --version
+# Example with overrides
+drover --system "You speak like Shakespeare." --temp 2 --tools false "Explain the concept of recursion."
 ```
 
-## Config
+## Configuration
 
-`drover` reads its config from:
+`drover` loads its configuration from `~/.config/drover/config.toml`. If the file doesn't exist, it will use the default values.
 
-```text
-~/.config/drover/config.toml
-```
-
-The config file is not created automatically. Create it yourself if you want persistent defaults.
-
-Default values:
+**Default Configuration:**
 
 ```toml
 model = "llama3"
@@ -69,50 +54,26 @@ temp = 0.7
 allow_tools = false
 ```
 
-Example:
+**CLI flags will override values defined in the config file.**
 
-```toml
-model = "llama3"
-host = "http://localhost:11434"
-temp = 0.7
-allow_tools = false
-```
+## Tool Usage
 
-CLI flags override config values for the current invocation, including `--tools true|false`.
+When the `--tools` flag is enabled (or `allow_tools = true` in the config file), `drover` lets the model interact with your filesystem.
 
-## Using Tools
+**Supported Tools:**
 
-When tools are enabled, drover allows the model to interact with the filesystem during a run. Tool access is controlled by `allow_tools` in config and can be overridden per invocation with `--tools true` or `--tools false`.
+| Tool     | Description                     |
+| -------- | ------------------------------- |
+| `read`   | Reads the contents of a file.   |
+| `list`   | Lists directory contents.       |
+| `stat`   | Returns file metadata.          |
+| `glob`   | Finds files matching a pattern. |
+| `search` | Searches for text within files. |
 
-Tool calls use this format:
-
-```text
-TOOL: <name> <arg1> <arg2> ...
-```
-
-Rules:
-
-- Emit exactly one tool call on a single line.
-- Arguments are space-separated.
-- Multiple values inside one argument use `|`.
-- All paths are relative to the current working directory.
-
-For example:
+**Example:**
 
 ```bash
-cat file.txt | drover --tools true "Summarize key points from this file"
+drover --tools true "Summarize key features from this repository"
 ```
 
-This sends `file.txt` to Ollama and uses the contents in answering the prompt. It supports the following tools:
-
-- `TOOL: read <path>`: Reads the contents of a file.
-- `TOOL: list <paths>`: Lists directory contents. Multiple paths go in one argument separated by `|`.
-- `TOOL: stat <path>`: Returns metadata about a file (size, modified time, etc.).
-- `TOOL: glob <pattern> [exclude]`: Finds files matching a pattern with an optional exclude glob (e.g., `TOOL: glob **/*.rs target/**/*`).
-- `TOOL: search <paths> <patterns>`: Searches for text within files. Multiple paths or patterns go in one argument separated by `|`.
-
-If an argument contains spaces, quote it. Examples:
-
-- `TOOL: read "my dir/file.txt"`
-- `TOOL: list "src|tests/my dir"`
-- `TOOL: search "src|tests" "my handler fn|other pattern"`
+This would instruct `drover` to allow the LLM to request the tool to read files and list directories to answer the question.
