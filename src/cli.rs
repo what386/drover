@@ -205,7 +205,10 @@ mod tests {
     fn rejects_missing_profile_value() {
         let err = parse(&["-p"]).unwrap_err();
 
-        assert_eq!(err.source().unwrap().to_string(), "missing value for --profile");
+        assert_eq!(
+            err.source().unwrap().to_string(),
+            "missing value for --profile"
+        );
     }
 
     #[test]
