@@ -48,6 +48,7 @@ drover --profile local --system "You speak like Shakespeare." --temp 2 --tools f
 **Default Configuration:**
 
 ```toml
+[default]
 model = "llama3"
 host = "http://localhost:11434"
 temp = 0.7
