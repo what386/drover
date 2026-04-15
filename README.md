@@ -38,7 +38,7 @@ drover "Tell me a story."
 cat my_document.txt | drover "Summarize this document."
 
 # Example with overrides
-drover --system "You speak like Shakespeare." --temp 2 --tools false "Explain the concept of recursion."
+drover --profile local --system "You speak like Shakespeare." --temp 2 --tools false "Explain the concept of recursion."
 ```
 
 ## Configuration
@@ -55,6 +55,8 @@ allow_tools = false
 ```
 
 **CLI flags will override values defined in the config file.**
+
+`drover` also accepts `--profile` / `-p` to select a config profile name. If omitted, it defaults to `default`. The profile name is parsed and carried through the CLI now so it can be wired into profile-based config selection later.
 
 ## Tool Usage
 
