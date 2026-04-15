@@ -18,7 +18,7 @@ impl Cli {
     pub fn run(self) -> Result<()> {
         let stdin_is_terminal = io::stdin().is_terminal();
         let prompt = self.resolve_prompt(stdin_is_terminal)?;
-        let config = Config::load().context("failed to load config")?;
+        let config = Config::load(&self.profile).context("failed to load config")?;
         let request = self.build_request(&config, prompt)?;
         let host = self.resolve_host(&config)?;
         let model = request.model.clone();
@@ -483,6 +483,7 @@ mod tests {
         let cli = Cli {
             host: None,
             model: None,
+            profile: "default".to_owned(),
             system: None,
             temp: None,
             tools: None,
@@ -532,6 +533,7 @@ mod tests {
         let cli = Cli {
             host: Some("http://override:11434".to_owned()),
             model: Some("cli-model".to_owned()),
+            profile: "default".to_owned(),
             system: Some("sys".to_owned()),
             temp: Some(0.1),
             tools: Some(false),
@@ -560,6 +562,7 @@ mod tests {
         let cli = Cli {
             host: None,
             model: None,
+            profile: "default".to_owned(),
             system: None,
             temp: None,
             tools: None,
@@ -582,6 +585,7 @@ mod tests {
         let cli = Cli {
             host: None,
             model: None,
+            profile: "default".to_owned(),
             system: None,
             temp: None,
             tools: None,
@@ -608,6 +612,7 @@ mod tests {
         let cli_enabled = Cli {
             host: None,
             model: None,
+            profile: "default".to_owned(),
             system: None,
             temp: None,
             tools: Some(true),
@@ -618,6 +623,7 @@ mod tests {
         let cli_disabled = Cli {
             host: None,
             model: None,
+            profile: "default".to_owned(),
             system: None,
             temp: None,
             tools: Some(false),

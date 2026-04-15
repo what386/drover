@@ -4,6 +4,7 @@ use anyhow::{Context, Result, anyhow, bail};
 pub struct Cli {
     pub host: Option<String>,
     pub model: Option<String>,
+    pub profile: String,
     pub system: Option<String>,
     pub temp: Option<f32>,
     pub tools: Option<bool>,
@@ -22,6 +23,7 @@ pub const HELP_TEXT: &str = concat!(
     "  --help             Show this help text and exit\n",
     "  --host, -H <url>   Ollama host override\n",
     "  --model, -m <name> Model selection\n",
+    "  --profile, -p <name>  Config profile name\n",
     "  --system, -s <prompt>  System prompt\n",
     "  --temp, -t <value> Temperature\n",
     "  --tools <true|false>  Enable or disable tool use for this run\n",
@@ -45,6 +47,7 @@ impl Cli {
         let mut cli = Self {
             host: None,
             model: None,
+            profile: "default".to_owned(),
             system: None,
             temp: None,
             tools: None,
@@ -61,6 +64,9 @@ impl Cli {
                 }
                 "--model" | "-m" => {
                     cli.model = Some(next_value(&mut args, "--model")?);
+                }
+                "--profile" | "-p" => {
+                    cli.profile = next_value(&mut args, "--profile")?;
                 }
                 "--system" | "-s" => {
                     cli.system = Some(next_value(&mut args, "--system")?);
@@ -131,6 +137,7 @@ mod tests {
         assert_eq!(cli.prompt.as_deref(), Some("write a haiku"));
         assert_eq!(cli.host, None);
         assert_eq!(cli.model, None);
+        assert_eq!(cli.profile, "default");
         assert_eq!(cli.system, None);
         assert_eq!(cli.temp, None);
         assert_eq!(cli.tools, None);
@@ -143,6 +150,8 @@ mod tests {
         let cli = parse(&[
             "-m",
             "llama3",
+            "-p",
+            "local",
             "-H",
             "http://localhost:11434",
             "-s",
@@ -157,6 +166,7 @@ mod tests {
 
         assert_eq!(cli.host.as_deref(), Some("http://localhost:11434"));
         assert_eq!(cli.model.as_deref(), Some("llama3"));
+        assert_eq!(cli.profile, "local");
         assert_eq!(cli.system.as_deref(), Some("you are a poet"));
         assert!(!cli.stream);
         assert_eq!(cli.tools, Some(false));
@@ -169,6 +179,7 @@ mod tests {
         let cli = parse(&["-t", "0.7", "prompt"]).unwrap();
 
         assert_eq!(cli.temp, Some(0.7));
+        assert_eq!(cli.profile, "default");
         assert_eq!(cli.prompt.as_deref(), Some("prompt"));
     }
 
@@ -180,6 +191,21 @@ mod tests {
             err.source().unwrap().to_string(),
             "missing value for --system"
         );
+    }
+
+    #[test]
+    fn parses_profile_long_flag() {
+        let cli = parse(&["--profile", "cloud", "prompt"]).unwrap();
+
+        assert_eq!(cli.profile, "cloud");
+        assert_eq!(cli.prompt.as_deref(), Some("prompt"));
+    }
+
+    #[test]
+    fn rejects_missing_profile_value() {
+        let err = parse(&["-p"]).unwrap_err();
+
+        assert_eq!(err.source().unwrap().to_string(), "missing value for --profile");
     }
 
     #[test]
