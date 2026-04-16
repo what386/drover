@@ -231,5 +231,18 @@
       "patch": 1,
       "is_prerelease": false
     }
+  },
+  {
+    "change": {
+      "description": "feat: add configurable tool access via allow_tools and --tools true/false",
+      "priority": "Medium",
+      "tags": [
+        "feature",
+        "security"
+      ],
+      "commit": null,
+      "completed_at": "2026-04-16T01:18:37.030482220Z"
+    },
+    "version": null
   }
 ]

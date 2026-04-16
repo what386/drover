@@ -11,9 +11,6 @@
 - [ ] feat: redesign filesystem tool calls with multi-path list/search support #feature
       @created 2026-04-06 22:18
 
-- [ ] feat: add configurable tool access via allow_tools and --tools true/false #feature #security
-      @created 2026-04-06 22:18
-
 - [ ] feat: config presets
       @created 2026-04-16 01:18
 
@@ -74,4 +71,8 @@
       @created 2026-04-06 23:26
       @completed 2026-04-06 23:26
       @completed_version 0.5.1
+
+- [x] feat: add configurable tool access via allow_tools and --tools true/false #feature #security
+      @created 2026-04-06 22:18
+      @completed 2026-04-16 01:18
 
