@@ -244,5 +244,15 @@
       "completed_at": "2026-04-16T01:18:37.030482220Z"
     },
     "version": null
+  },
+  {
+    "change": {
+      "description": "feat: config presets",
+      "priority": "Medium",
+      "tags": [],
+      "commit": null,
+      "completed_at": "2026-04-16T01:18:56.717328774Z"
+    },
+    "version": null
   }
 ]
