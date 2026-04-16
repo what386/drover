@@ -2,6 +2,14 @@
 
 *Generated on 2026-04-16*
 
+## 0.6.0 — 2026-04-16
+
+### Changes
+
+- feat: add configurable tool access via allow_tools and --tools true/false `feature`, `security`
+- feat: config presets
+
+
 ## 0.5.1 — 2026-04-06
 
 ### Changes
