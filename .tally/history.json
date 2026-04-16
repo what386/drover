@@ -243,7 +243,12 @@
       "commit": null,
       "completed_at": "2026-04-16T01:18:37.030482220Z"
     },
-    "version": null
+    "version": {
+      "major": 0,
+      "minor": 6,
+      "patch": 0,
+      "is_prerelease": false
+    }
   },
   {
     "change": {
@@ -253,6 +258,11 @@
       "commit": null,
       "completed_at": "2026-04-16T01:18:56.717328774Z"
     },
-    "version": null
+    "version": {
+      "major": 0,
+      "minor": 6,
+      "patch": 0,
+      "is_prerelease": false
+    }
   }
 ]

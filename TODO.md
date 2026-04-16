@@ -72,8 +72,10 @@
 - [x] feat: add configurable tool access via allow_tools and --tools true/false #feature #security
       @created 2026-04-06 22:18
       @completed 2026-04-16 01:18
+      @completed_version 0.6.0
 
 - [x] feat: config presets
       @created 2026-04-16 01:18
       @completed 2026-04-16 01:18
+      @completed_version 0.6.0
 
