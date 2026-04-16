@@ -1,6 +1,6 @@
 # Changelog — drover
 
-*Generated on 2026-04-06*
+*Generated on 2026-04-16*
 
 ## 0.5.1 — 2026-04-06
 
