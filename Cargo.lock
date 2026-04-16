@@ -86,7 +86,7 @@ dependencies = [
 
 [[package]]
 name = "drover"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "globset",
